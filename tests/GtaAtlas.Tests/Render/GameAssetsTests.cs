@@ -20,6 +20,9 @@ public class GameAssetsTests(ITestOutputHelper output)
         using var assets = GameAssets.Start(session.Install);
         await assets.Ready.WaitAsync(TimeSpan.FromMinutes(3), TestContext.Current.CancellationToken);
         output.WriteLine($"init {sw.ElapsedMilliseconds} ms, {GC.GetTotalMemory(false) >> 20} MB managed");
+        Assert.NotNull(assets.Progress); // the fast init path ran
+        Assert.Equal(1, assets.Progress.Value);
+        output.WriteLine("stages: " + string.Join(", ", assets.Progress.Timings.Select(t => $"{t.Stage} {t.Ms}")));
 
         var arch = assets.Cache.GetArchetype(JenkHash.GenHash("prop_bench_01a"));
         Assert.NotNull(arch);

@@ -183,17 +183,37 @@ internal sealed class MainForm : Form
         StartGameAssets();
     }
 
-    /// <summary>Starts loading the game file cache for 3D previews; takes ~10 s, so it runs while the user browses.</summary>
+    /// <summary>
+    /// Starts loading the game file cache for 3D previews; takes ~6 s, so it runs while the user browses, with
+    /// progress in the sidebar.
+    /// </summary>
     private async void StartGameAssets()
     {
+        _nav.SetLoading("Loading 3D preview", "Opening game files");
         try
         {
-            var install = await Task.Run(() => GameSession.Open(_paths, _settings).Install);
-            _assets = GameAssets.Start(install, error => AppLog.Write("game", [error]));
+            var open = Task.Run(() => GameSession.Open(_paths, _settings).Install);
+            while (!open.IsCompleted)
+            {
+                _nav.Invalidate(); // animates the indeterminate bar
+                await Task.Delay(50);
+            }
+            _assets = GameAssets.Start(await open, error => AppLog.Write("game", [error]));
+            while (!_assets.Ready.IsCompleted && !IsDisposed)
+            {
+                _nav.SetLoading("Loading 3D preview", _assets.StageLabel, _assets.Progress?.Value);
+                await Task.Delay(50);
+            }
+            await _assets.Ready;
+            _nav.SetLoading(null);
         }
         catch (Exception e)
         {
             AppLog.Write("game", [e.ToString()]);
+            if (IsDisposed)
+                return;
+            _nav.SetLoading(null);
+            _toast.Show(@"3D preview unavailable, see logs\game.log", Glyph.Clear);
         }
     }
 

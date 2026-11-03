@@ -32,8 +32,13 @@ namespace GtaAtlas.Render
             error ??= _ => { };
             Ready = Task.Run(() =>
             {
-                if (!CacheInit.TryInitWithoutMaps(Cache, install, s => Status = s, error))
+                var progress = InitProgress.ForFolder(install.Folder);
+                Progress = progress;
+                if (!CacheInit.TryInitWithoutMaps(Cache, install, s => Status = s, error, progress))
+                {
+                    Progress = null; // upstream init reports no stages
                     Cache.Init(s => Status = s, error);
+                }
             });
             _pump = new Thread(Pump) { IsBackground = true, Name = "GameAssets content" };
             _pump.Start();
@@ -46,6 +51,19 @@ namespace GtaAtlas.Render
 
         /// <summary>Latest progress message from the cache scan.</summary>
         public string Status { get; private set; } = "Starting";
+
+        /// <summary>Estimated init completion; null when unknown (fallback init path).</summary>
+        public InitProgress Progress { get; private set; }
+
+        /// <summary>User-facing name of the init stage, e.g. "Loading models".</summary>
+        public string StageLabel =>
+            Ready.IsFaulted ? "Game files failed to load"
+            : Ready.IsCompleted ? "Game files ready"
+            : Progress?.Label ?? "Loading game files";
+
+        /// <summary><see cref="StageLabel"/> with the percentage when known, e.g. "Loading models 62%".</summary>
+        public string Describe() =>
+            Progress is { } p && !Ready.IsCompleted ? $"{StageLabel} {p.Value * 100:0}%" : StageLabel;
 
         public static GameAssets Start(GameInstall install, Action<string> error = null) => new(install, error);
 

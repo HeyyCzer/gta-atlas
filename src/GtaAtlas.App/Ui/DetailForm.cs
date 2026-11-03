@@ -437,7 +437,7 @@ internal sealed class DetailForm : Form
                 var icon = new Rectangle(stage.X, stage.Y + stage.Height / 2 - Px(70), stage.Width, Px(100));
                 using (var big = new Font(Theme.IconLarge.FontFamily, 54f))
                     Theme.DrawIcon(g, AssetGridView.KindGlyph(_item.Kind), icon, Color.FromArgb(0xA0, color), big);
-                var text = _assets is { Ready.IsCompleted: false } && _viewport is not null ? $"{_message}\n{_assets.Status}" : _message;
+                var text = _assets is { Ready.IsCompleted: false } && _viewport is not null ? $"{_message}\n{_assets.Describe()}" : _message;
                 TextRenderer.DrawText(g, text, Theme.UiFont, new Rectangle(stage.X + Px(16), icon.Bottom + Px(8), stage.Width - Px(32), Px(48)), Theme.Faint,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
             }

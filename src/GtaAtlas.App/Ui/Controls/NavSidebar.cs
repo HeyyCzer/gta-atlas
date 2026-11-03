@@ -2,7 +2,10 @@ using GtaAtlas.App.Browsing;
 
 namespace GtaAtlas.App.Ui.Controls;
 
-/// <summary>Left navigation: brand, grouped categories with icons and counts, and a footer with index status.</summary>
+/// <summary>
+/// Left navigation: brand, grouped categories with icons and counts, and a footer with index status and, while the
+/// game files load for 3D previews, a progress bar.
+/// </summary>
 internal sealed class NavSidebar : ThemedControl
 {
     private static readonly (string Header, Category[] Items)[] Sections =
@@ -18,6 +21,9 @@ internal sealed class NavSidebar : ThemedControl
     private Category? _hover;
     private Func<Category, int?> _count = _ => null;
     private string _footer = "";
+    private string? _loading;
+    private string? _loadingDetail;
+    private double? _loadingValue;
 
     public NavSidebar()
     {
@@ -48,6 +54,18 @@ internal sealed class NavSidebar : ThemedControl
     {
         _count = count;
         _footer = footer;
+        Invalidate();
+    }
+
+    /// <summary>
+    /// Shows a background load above the footer: title and percentage, bar, detail line. <paramref name="value"/>
+    /// null = indeterminate bar; <paramref name="title"/> null hides it all.
+    /// </summary>
+    public void SetLoading(string? title, string? detail = null, double? value = null)
+    {
+        _loading = title;
+        _loadingDetail = detail;
+        _loadingValue = value;
         Invalidate();
     }
 
@@ -117,6 +135,37 @@ internal sealed class NavSidebar : ThemedControl
         var footer = new Rectangle(Px(18), _reindex.Top - Px(50), Width - Px(36), Px(44));
         TextRenderer.DrawText(g, _footer, Theme.Small, footer, Theme.Faint,
             TextFormatFlags.Left | TextFormatFlags.Bottom | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+        if (_loading is not null)
+            PaintLoading(g, new Rectangle(footer.X, footer.Y - Px(58), footer.Width, Px(48)));
+    }
+
+    private void PaintLoading(Graphics g, Rectangle r)
+    {
+        var line = new Rectangle(r.X, r.Y, r.Width, Px(18));
+        var percent = _loadingValue is { } p ? $"{p * 100:0}%" : null;
+        var percentWidth = percent is null ? 0 : TextRenderer.MeasureText(percent, Theme.Small).Width + Px(6);
+        TextRenderer.DrawText(g, _loading, Theme.Small, line with { Width = line.Width - percentWidth }, Theme.Muted, Theme.Line | TextFormatFlags.EndEllipsis);
+        if (percent is not null)
+            TextRenderer.DrawText(g, percent, Theme.Small, line, Theme.Faint, Theme.Line | TextFormatFlags.Right);
+        var track = new Rectangle(r.X, line.Bottom + Px(4), r.Width, Px(4));
+        if (_loadingDetail is not null)
+            TextRenderer.DrawText(g, _loadingDetail, Theme.Small, new Rectangle(r.X, track.Bottom + Px(4), r.Width, Px(18)), Theme.Faint,
+                Theme.Line | TextFormatFlags.EndEllipsis);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        Theme.FillRounded(g, track, Px(2), Theme.Raised);
+        Rectangle fill;
+        if (_loadingValue is { } v)
+            fill = track with { Width = (int)(track.Width * Math.Clamp(v, 0, 1)) };
+        else
+        {
+            // Indeterminate: a third of the track sweeping across; the owner repaints while loading.
+            var phase = Environment.TickCount64 % 1400 / 1400d;
+            var w = track.Width / 3;
+            var x = track.X - w + (int)((track.Width + w) * phase);
+            fill = Rectangle.Intersect(track, track with { X = x, Width = w });
+        }
+        if (fill.Width > 0)
+            Theme.FillRounded(g, fill, Px(2), Theme.Accent);
     }
 
     /// <summary>158,989 → 159K; small numbers stay exact.</summary>

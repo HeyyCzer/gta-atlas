@@ -43,10 +43,22 @@ namespace GtaAtlas.Render
         private static MethodInfo Method(string name) => T.GetMethod(name, Any, Type.EmptyTypes);
 
         /// <summary>Returns false (having done nothing) if upstream no longer matches.</summary>
-        public static bool TryInitWithoutMaps(GameFileCache cache, GameInstall install, Action<string> status, Action<string> error)
+        public static bool TryInitWithoutMaps(GameFileCache cache, GameInstall install, Action<string> status, Action<string> error,
+            InitProgress progress = null)
         {
             if (!Supported)
                 return false;
+
+            if (progress != null)
+            {
+                var report = status;
+                status = s =>
+                {
+                    progress.Status(s);
+                    report(s);
+                };
+                progress.Enter(InitProgress.Scan);
+            }
 
             StatusField.SetValue(cache, status);
             ErrorField.SetValue(cache, error);
@@ -59,6 +71,7 @@ namespace GtaAtlas.Render
                 BuildExtendedJenkIndex = cache.BuildExtendedJenkIndex,
             };
             cache.RpfMan.Init(install.Folder, install.Gen9, status, error);
+            progress?.Enter(InitGlobal.Name);
             Invoke(InitGlobal, cache);
 
             foreach (var setter in MapDictSetters)
@@ -67,7 +80,11 @@ namespace GtaAtlas.Render
             cache.YmapHierarchyDict = [];
 
             foreach (var step in Steps)
+            {
+                progress?.Enter(step.Name);
                 Invoke(step, cache);
+            }
+            progress?.Complete();
 
             status("Scan complete");
             cache.IsInited = true;
