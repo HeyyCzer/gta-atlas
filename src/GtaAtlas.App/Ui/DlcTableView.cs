@@ -11,7 +11,7 @@ internal sealed class DlcTableView : ThemedControl
     private IReadOnlyList<DlcSummary> _rows = [];
     private int _sortColumn = DlcTable.DefaultColumn;
     private bool _descending = DlcTable.DefaultDescending;
-    private int _scroll;
+    private readonly SmoothScroll _smooth;
     private int _hoverRow = -1;
     private int _hoverHeader = -1;
     private int _selected = -1;
@@ -20,6 +20,18 @@ internal sealed class DlcTableView : ThemedControl
     {
         SetStyle(ControlStyles.Selectable, true);
         TabStop = true;
+        _smooth = new SmoothScroll(this, () => MaxScroll);
+        _smooth.Changed += (_, _) =>
+        {
+            Invalidate();
+        };
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            _smooth.Dispose();
+        base.Dispose(disposing);
     }
 
     public event EventHandler<DlcSummary>? DlcActivated;
@@ -35,7 +47,7 @@ internal sealed class DlcTableView : ThemedControl
     private void Resort()
     {
         _rows = DlcTable.Sort(_all, _sortColumn, _descending);
-        _scroll = Math.Clamp(_scroll, 0, MaxScroll);
+        _smooth.Clamp();
         Invalidate();
     }
 
@@ -71,10 +83,10 @@ internal sealed class DlcTableView : ThemedControl
         var cols = DlcTable.Columns;
 
         g.SetClip(new Rectangle(0, HeaderHeight, Width, Height - HeaderHeight));
-        var first = _scroll / RowHeight;
+        var first = _smooth.Value / RowHeight;
         for (var i = first; i < _rows.Count; i++)
         {
-            var y = HeaderHeight + i * RowHeight - _scroll;
+            var y = HeaderHeight + i * RowHeight - _smooth.Value;
             if (y > Height)
                 break;
             var d = _rows[i];
@@ -126,13 +138,13 @@ internal sealed class DlcTableView : ThemedControl
             var view = Height - HeaderHeight;
             var total = _rows.Count * RowHeight + Px(16);
             var h = Math.Max(Px(30), view * view / total);
-            var y = HeaderHeight + (view - h) * _scroll / MaxScroll;
+            var y = HeaderHeight + (view - h) * _smooth.Value / MaxScroll;
             Theme.FillRounded(g, new Rectangle(Width - Px(8), y, Px(3), h), Px(1), Theme.BorderStrong);
         }
     }
 
     private int RowAt(Point p) =>
-        p.Y < HeaderHeight ? -1 : (p.Y - HeaderHeight + _scroll) / RowHeight is var i && i < _rows.Count ? i : -1;
+        p.Y < HeaderHeight ? -1 : (p.Y - HeaderHeight + _smooth.Value) / RowHeight is var i && i < _rows.Count ? i : -1;
 
     private int HeaderAt(Point p)
     {
@@ -188,8 +200,7 @@ internal sealed class DlcTableView : ThemedControl
 
     protected override void OnMouseWheel(MouseEventArgs e)
     {
-        _scroll = Math.Clamp(_scroll - e.Delta / 120 * RowHeight * 3, 0, MaxScroll);
-        Invalidate();
+        _smooth.By(-e.Delta * RowHeight * 3 / 120);
         base.OnMouseWheel(e);
     }
 
@@ -211,10 +222,7 @@ internal sealed class DlcTableView : ThemedControl
             _selected = Math.Clamp(target, 0, _rows.Count - 1);
             var top = _selected * RowHeight;
             var view = Height - HeaderHeight - Px(16);
-            if (top < _scroll)
-                _scroll = top;
-            else if (top + RowHeight > _scroll + view)
-                _scroll = Math.Min(MaxScroll, top + RowHeight - view);
+            _smooth.Reveal(top, top + RowHeight, view);
             Invalidate();
         }
         else if (e.KeyCode == Keys.Enter && _selected >= 0)
@@ -227,6 +235,6 @@ internal sealed class DlcTableView : ThemedControl
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
-        _scroll = Math.Clamp(_scroll, 0, MaxScroll);
+        _smooth?.Clamp();
     }
 }

@@ -19,13 +19,26 @@ internal sealed class DetailView : ThemedControl
 
     private readonly List<Block> _blocks = [];
     private AssetDetail? _detail;
-    private int _scroll;
+    private readonly SmoothScroll _smooth;
     private int _contentHeight;
     private RowBlock? _hover;
 
     public DetailView()
     {
         BackColor = Theme.Surface;
+        _smooth = new SmoothScroll(this, () => MaxScroll);
+        _smooth.Changed += (_, _) =>
+        {
+            UpdateHover(PointToClient(MousePosition));
+            Invalidate();
+        };
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            _smooth.Dispose();
+        base.Dispose(disposing);
     }
 
     /// <summary>Raised with the value the user clicked.</summary>
@@ -34,8 +47,8 @@ internal sealed class DetailView : ThemedControl
     public void Display(AssetDetail? detail)
     {
         _detail = detail;
-        _scroll = 0;
         Rebuild();
+        _smooth.Jump(0);
         Invalidate();
     }
 
@@ -118,7 +131,7 @@ internal sealed class DetailView : ThemedControl
             Row(s.Dlc, s.Path, true);
 
         _contentHeight = y + Px(24);
-        _scroll = Math.Clamp(_scroll, 0, MaxScroll);
+        _smooth?.Clamp();
     }
 
     private int MaxScroll => Math.Max(0, _contentHeight - Height);
@@ -133,7 +146,7 @@ internal sealed class DetailView : ThemedControl
     {
         var g = e.Graphics;
         g.Clear(BackColor);
-        g.TranslateTransform(0, -_scroll);
+        g.TranslateTransform(0, -_smooth.Value);
 
         foreach (var block in _blocks)
         {
@@ -159,7 +172,7 @@ internal sealed class DetailView : ThemedControl
         if (MaxScroll > 0)
         {
             var h = Math.Max(Px(30), Height * Height / _contentHeight);
-            var y = (Height - h) * _scroll / MaxScroll;
+            var y = (Height - h) * _smooth.Value / MaxScroll;
             Theme.FillRounded(g, new Rectangle(Width - Px(6), y, Px(3), h), Px(1), Theme.BorderStrong);
         }
     }
@@ -187,15 +200,13 @@ internal sealed class DetailView : ThemedControl
 
     protected override void OnMouseWheel(MouseEventArgs e)
     {
-        _scroll = Math.Clamp(_scroll - e.Delta / 120 * Px(60), 0, MaxScroll);
-        UpdateHover(PointToClient(MousePosition));
-        Invalidate();
+        _smooth.By(-e.Delta * Px(100) / 120);
         base.OnMouseWheel(e);
     }
 
     private void UpdateHover(Point p)
     {
-        var content = p with { Y = p.Y + _scroll };
+        var content = p with { Y = p.Y + _smooth.Value };
         var hit = _blocks.OfType<RowBlock>().FirstOrDefault(r => Rectangle.Inflate(r.Bounds, Px(10), 0).Contains(content));
         if (hit != _hover)
         {

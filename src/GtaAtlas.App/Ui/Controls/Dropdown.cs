@@ -133,7 +133,7 @@ internal sealed class PickerList : ThemedControl
     private readonly int _selected;
     private List<int> _visible;
     private int _highlight;
-    private int _scroll;
+    private readonly SmoothScroll _smooth;
 
     public PickerList(IReadOnlyList<PickerItem> items, int selected)
     {
@@ -143,6 +143,18 @@ internal sealed class PickerList : ThemedControl
         _highlight = selected;
         BackColor = Theme.Surface;
         SetStyle(ControlStyles.Selectable, true);
+        _smooth = new SmoothScroll(this, () => MaxScroll);
+        _smooth.Changed += (_, _) =>
+        {
+            Invalidate();
+        };
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            _smooth.Dispose();
+        base.Dispose(disposing);
     }
 
     public event EventHandler<int>? Picked;
@@ -159,7 +171,7 @@ internal sealed class PickerList : ThemedControl
                         || (_items[i].Detail?.Contains(t, StringComparison.OrdinalIgnoreCase) ?? false))
             .ToList();
         _highlight = _visible.FirstOrDefault(-1);
-        _scroll = 0;
+        _smooth.Jump(0);
         Invalidate();
     }
 
@@ -169,11 +181,11 @@ internal sealed class PickerList : ThemedControl
         switch (e.KeyCode)
         {
             case Keys.Down:
-                Move(Math.Min(_visible.Count - 1, pos + 1));
+                MoveHighlight(Math.Min(_visible.Count - 1, pos + 1));
                 e.Handled = e.SuppressKeyPress = true;
                 break;
             case Keys.Up:
-                Move(Math.Max(0, pos - 1));
+                MoveHighlight(Math.Max(0, pos - 1));
                 e.Handled = e.SuppressKeyPress = true;
                 break;
             case Keys.Enter when _highlight >= 0:
@@ -183,23 +195,21 @@ internal sealed class PickerList : ThemedControl
         }
     }
 
-    private void Move(int pos)
+    private void MoveHighlight(int pos)
     {
         if (pos < 0 || pos >= _visible.Count)
             return;
         _highlight = _visible[pos];
         var top = pos * RowHeight;
-        if (top < _scroll)
-            _scroll = top;
-        else if (top + RowHeight > _scroll + Height)
-            _scroll = top + RowHeight - Height;
+        _smooth.Reveal(top, top + RowHeight, Height);
         Invalidate();
     }
 
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        Move(_visible.IndexOf(_selected));
+        MoveHighlight(_visible.IndexOf(_selected));
+        _smooth.Jump(_smooth.Target); // open already scrolled to the selection
     }
 
     protected override bool IsInputKey(Keys keyData) => (keyData & Keys.KeyCode) is Keys.Up or Keys.Down or Keys.Enter || base.IsInputKey(keyData);
@@ -220,12 +230,12 @@ internal sealed class PickerList : ThemedControl
             return;
         }
 
-        var first = _scroll / RowHeight;
-        for (var pos = first; pos < _visible.Count && pos * RowHeight - _scroll < Height; pos++)
+        var first = _smooth.Value / RowHeight;
+        for (var pos = first; pos < _visible.Count && pos * RowHeight - _smooth.Value < Height; pos++)
         {
             var index = _visible[pos];
             var item = _items[index];
-            var r = new Rectangle(0, pos * RowHeight - _scroll, Width - Px(6), RowHeight);
+            var r = new Rectangle(0, pos * RowHeight - _smooth.Value, Width - Px(6), RowHeight);
             if (index == _highlight)
                 Theme.FillRounded(g, Rectangle.Inflate(r, 0, -Px(1)), Px(6), Theme.Hover);
             if (index == _selected)
@@ -243,21 +253,20 @@ internal sealed class PickerList : ThemedControl
         {
             var total = _visible.Count * RowHeight;
             var h = Math.Max(Px(24), Height * Height / total);
-            var y = (Height - h) * _scroll / MaxScroll;
+            var y = (Height - h) * _smooth.Value / MaxScroll;
             Theme.FillRounded(g, new Rectangle(Width - Px(4), y, Px(3), h), Px(1), Theme.BorderStrong);
         }
     }
 
     protected override void OnMouseWheel(MouseEventArgs e)
     {
-        _scroll = Math.Clamp(_scroll - e.Delta / 120 * RowHeight * 3, 0, MaxScroll);
-        Invalidate();
+        _smooth.By(-e.Delta * RowHeight * 3 / 120);
         base.OnMouseWheel(e);
     }
 
     private int HitTest(Point p)
     {
-        var pos = (p.Y + _scroll) / RowHeight;
+        var pos = (p.Y + _smooth.Value) / RowHeight;
         return pos >= 0 && pos < _visible.Count ? _visible[pos] : -1;
     }
 

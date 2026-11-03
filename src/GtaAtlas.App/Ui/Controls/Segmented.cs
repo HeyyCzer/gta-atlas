@@ -64,7 +64,7 @@ internal sealed class Segmented : ThemedControl
 
     private int PreferredWidth => _segments.Sum(SegmentWidth) + Px(6);
 
-    private Rectangle Bounds(int index)
+    private Rectangle SegmentBounds(int index)
     {
         var x = Px(3);
         for (var i = 0; i < index; i++)
@@ -79,7 +79,7 @@ internal sealed class Segmented : ThemedControl
         Theme.FillRounded(g, new Rectangle(0, 0, Width - 1, Height - 1), Px(10), Theme.Raised, Theme.Border);
         for (var i = 0; i < _segments.Count; i++)
         {
-            var r = Bounds(i);
+            var r = SegmentBounds(i);
             var selected = i == _selected;
             if (selected)
                 Theme.FillRounded(g, r, Px(7), Theme.Hover, Theme.BorderStrong);
@@ -104,7 +104,7 @@ internal sealed class Segmented : ThemedControl
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
-        var hit = Enumerable.Range(0, _segments.Count).FirstOrDefault(i => Bounds(i).Contains(e.Location), -1);
+        var hit = Enumerable.Range(0, _segments.Count).FirstOrDefault(i => SegmentBounds(i).Contains(e.Location), -1);
         if (hit != _hover)
         {
             _hover = hit;

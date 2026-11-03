@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using GtaAtlas.App.Browsing;
+using GtaAtlas.App.Ui.Controls;
 using GtaAtlas.Data;
 
 namespace GtaAtlas.App.Ui;
@@ -18,6 +19,8 @@ internal sealed class AssetGridView : Control
 {
     private readonly VScrollBar _scrollBar = new() { Dock = DockStyle.Right };
     private readonly ToolTip _toolTip = new() { InitialDelay = 600 };
+    private readonly SmoothScroll _smooth;
+    private bool _syncingScrollBar;
     private ResultPager _pager = ResultPager.Empty;
     private ViewMode _mode = ViewMode.Grid;
     private int _selected = -1;
@@ -32,7 +35,32 @@ internal sealed class AssetGridView : Control
         ForeColor = Theme.Text;
         TabStop = true;
         Controls.Add(_scrollBar);
-        _scrollBar.ValueChanged += (_, _) => Invalidate();
+        _smooth = new SmoothScroll(this, () => MaxScroll);
+        _smooth.Changed += (_, _) =>
+        {
+            _syncingScrollBar = true;
+            _scrollBar.Value = Math.Clamp(_smooth.Value, 0, MaxScroll);
+            _syncingScrollBar = false;
+            UpdateHover(PointToClient(MousePosition));
+        };
+        _scrollBar.ValueChanged += (_, _) =>
+        {
+            // Dragging the bar is direct; only wheel/keyboard animate.
+            if (!_syncingScrollBar)
+                _smooth.Jump(_scrollBar.Value);
+            Invalidate();
+        };
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _smooth.Dispose();
+            ClearRowCache();
+            ClearTiles();
+        }
+        base.Dispose(disposing);
     }
 
     public event EventHandler? SelectionChanged;
@@ -81,8 +109,8 @@ internal sealed class AssetGridView : Control
         var keep = SelectedItem?.Id;
         _pager = pager;
         _hover = -1;
-        _scrollBar.Value = 0;
         UpdateScroll();
+        _smooth.Jump(0);
         var index = keep is { } id ? pager.IndexOf(id) : -1;
         _selected = -1;
         SelectedIndex = index >= 0 ? index : (Count > 0 ? 0 : -1);
@@ -151,11 +179,10 @@ internal sealed class AssetGridView : Control
         _scrollBar.SmallChange = RowHeight;
         _scrollBar.Maximum = Math.Max(0, content);
         _scrollBar.Visible = content > view;
-        ClampScroll(_scrollBar.Value);
+        _smooth?.Clamp();
     }
 
-    private void ClampScroll(int value) =>
-        _scrollBar.Value = Math.Clamp(value, 0, Math.Max(0, _scrollBar.Maximum - _scrollBar.LargeChange + 1));
+    private int MaxScroll => Math.Max(0, _scrollBar.Maximum - _scrollBar.LargeChange + 1);
 
     public void EnsureVisible(int index)
     {
@@ -163,11 +190,7 @@ internal sealed class AssetGridView : Control
             return;
         var view = ClientSize.Height - ContentTop;
         var top = index / Columns * RowHeight;
-        var bottom = top + RowHeight;
-        if (top < _scrollBar.Value)
-            ClampScroll(top);
-        else if (bottom > _scrollBar.Value + view)
-            ClampScroll(bottom - view);
+        _smooth.Reveal(top, top + RowHeight, view);
     }
 
     protected override void OnResize(EventArgs e)
@@ -192,51 +215,110 @@ internal sealed class AssetGridView : Control
             return;
         }
 
+        // Rows come from the bitmap cache: a frame is a few opaque blits, cheap enough for high refresh rates.
+        var scroll = _scrollBar.Value;
+        var firstRow = Math.Max(0, scroll / RowHeight);
+        var lastRow = Math.Min(Rows - 1, (scroll + ClientSize.Height - ContentTop) / RowHeight);
+        for (var row = firstRow; row <= lastRow; row++)
+            g.DrawImageUnscaled(RowBitmap(row), 0, RowTop(row));
+
+        // Hovered and selected items change often: draw them live on top of the cached row.
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        var firstRow = Math.Max(0, _scrollBar.Value / RowHeight);
-        var first = firstRow * Columns;
-        var last = Math.Min(Count - 1, ((_scrollBar.Value + ClientSize.Height) / RowHeight + 1) * Columns - 1);
-        for (var i = first; i <= last; i++)
+        foreach (var i in new[] { _selected, _hover }.Distinct())
         {
-            if (_pager[i] is not { } item)
+            if (i < 0 || i / Columns < firstRow || i / Columns > lastRow || _pager[i] is not { } item)
                 continue;
-            var bounds = ItemBounds(i);
             if (_mode == ViewMode.List)
-                PaintRow(g, item, i, bounds);
+                PaintRow(g, item, i, ItemBounds(i));
             else
-                PaintCard(g, item, i, bounds);
+                PaintCard(g, item, i, ItemBounds(i));
         }
 
         if (_mode == ViewMode.List)
             PaintListHeader(g);
     }
 
+    private const int MaxCachedRows = 16;
+    private readonly Dictionary<int, Bitmap> _rowCache = [];
+    private readonly LinkedList<int> _rowOrder = new();
+    private (int Width, ViewMode Mode, int Columns, ResultPager Pager) _rowCacheKey;
+    private bool _paintingCache;
+
+    private int RowTop(int row) => ContentTop + row * RowHeight - _scrollBar.Value;
+
+    /// <summary>One grid/list row rendered in its resting state (not hovered, not selected).</summary>
+    private Bitmap RowBitmap(int row)
+    {
+        var key = (ViewWidth, _mode, Columns, _pager);
+        if (key != _rowCacheKey)
+        {
+            ClearRowCache();
+            _rowCacheKey = key;
+        }
+        if (_rowCache.TryGetValue(row, out var cached))
+        {
+            _rowOrder.Remove(row);
+            _rowOrder.AddFirst(row);
+            return cached;
+        }
+
+        // 32bpp RGB (no alpha): GDI text renders correctly into it and it blits without blending.
+        var bitmap = new Bitmap(Math.Max(1, ViewWidth), RowHeight, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
+        using (var g = Graphics.FromImage(bitmap))
+        {
+            g.Clear(BackColor);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var top = RowTop(row);
+            _paintingCache = true;
+            for (var i = row * Columns; i < Math.Min(Count, (row + 1) * Columns); i++)
+            {
+                if (_pager[i] is not { } item)
+                    continue;
+                var r = ItemBounds(i);
+                r.Y -= top;
+                if (_mode == ViewMode.List)
+                    PaintRow(g, item, i, r);
+                else
+                    PaintCard(g, item, i, r);
+            }
+            _paintingCache = false;
+        }
+
+        _rowCache[row] = bitmap;
+        _rowOrder.AddFirst(row);
+        while (_rowOrder.Count > MaxCachedRows)
+        {
+            _rowCache.Remove(_rowOrder.Last!.Value, out var old);
+            old?.Dispose();
+            _rowOrder.RemoveLast();
+        }
+        return bitmap;
+    }
+
+    private void ClearRowCache()
+    {
+        foreach (var b in _rowCache.Values)
+            b.Dispose();
+        _rowCache.Clear();
+        _rowOrder.Clear();
+    }
+
+    private bool IsSelected(int index) => !_paintingCache && index == _selected;
+
+    private bool IsHovered(int index) => !_paintingCache && index == _hover;
+
     private void PaintCard(Graphics g, AssetSummary item, int index, Rectangle r)
     {
-        var selected = index == _selected;
-        var hover = index == _hover;
+        var selected = IsSelected(index);
+        var hover = IsHovered(index);
         var radius = Px(12);
         Theme.FillRounded(g, r, radius, hover || selected ? Theme.Raised : Theme.Surface,
             selected ? Theme.Accent : hover ? Theme.BorderStrong : Theme.Border);
 
-        // Image area: placeholder tile until thumbnails exist (Phase 4).
-        var kindColor = Theme.KindColor(item.Kind);
+        // Image area: placeholder tile until thumbnails exist (Phase 4). Same for every card of a kind: cached.
         var image = new Rectangle(r.X + Px(6), r.Y + Px(6), r.Width - Px(12), ImageHeight - Px(6));
-        using (var path = Theme.RoundedRect(image, Px(8)))
-        using (var brush = new LinearGradientBrush(image, Color.FromArgb(0x22, kindColor), Color.FromArgb(0x08, kindColor), 90f))
-        {
-            using var back = new SolidBrush(Theme.Back);
-            g.FillPath(back, path);
-            g.FillPath(brush, path);
-        }
-        Theme.DrawIcon(g, KindGlyph(item.Kind), image, Color.FromArgb(0xB0, kindColor), Theme.IconLarge);
-
-        // Kind label on the image, bottom-left.
-        var kind = AssetText.KindTitle(item.Kind).ToUpperInvariant();
-        var kindSize = TextRenderer.MeasureText(kind, Theme.Caption);
-        var kindRect = new Rectangle(image.X + Px(8), image.Bottom - Px(26), kindSize.Width + Px(6), Px(18));
-        Theme.FillRounded(g, kindRect, Px(4), Color.FromArgb(0xC0, Theme.Back));
-        TextRenderer.DrawText(g, kind, Theme.Caption, kindRect, kindColor, Theme.Centered);
+        var cardBack = hover || selected ? Theme.Raised : Theme.Surface;
+        g.DrawImageUnscaled(Tile(item.Kind, image.Size, cardBack), image.Location);
 
         if (hover || selected)
             PaintCopy(g, CopyBounds(r), index, Color.FromArgb(0xD0, Theme.Back));
@@ -251,6 +333,47 @@ internal sealed class AssetGridView : Control
             TextRenderer.DrawText(g, sub, Theme.Small, new Rectangle(x, y, w, Px(18)), Theme.Muted, Theme.Line);
         y += Px(22);
         PaintBadge(g, item.Dlc, x, y, w);
+    }
+
+    private readonly Dictionary<(string Kind, Size Size, Color Back), Bitmap> _tiles = [];
+
+    private Bitmap Tile(string kind, Size size, Color cardBack)
+    {
+        if (_tiles.TryGetValue((kind, size, cardBack), out var tile))
+            return tile;
+
+        tile = new Bitmap(size.Width, size.Height, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
+        using var g = Graphics.FromImage(tile);
+        g.Clear(cardBack);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        var kindColor = Theme.KindColor(kind);
+        var r = new Rectangle(0, 0, size.Width - 1, size.Height - 1);
+        using (var path = Theme.RoundedRect(r, Px(8)))
+        using (var brush = new LinearGradientBrush(r, Color.FromArgb(0x22, kindColor), Color.FromArgb(0x08, kindColor), 90f))
+        {
+            using var back = new SolidBrush(Theme.Back);
+            g.FillPath(back, path);
+            g.FillPath(brush, path);
+        }
+        Theme.DrawIcon(g, KindGlyph(kind), r, Color.FromArgb(0xB0, kindColor), Theme.IconLarge);
+
+        var label = AssetText.KindTitle(kind).ToUpperInvariant();
+        var labelSize = TextRenderer.MeasureText(label, Theme.Caption);
+        var labelRect = new Rectangle(Px(8), r.Bottom - Px(26), labelSize.Width + Px(6), Px(18));
+        Theme.FillRounded(g, labelRect, Px(4), Color.FromArgb(0xC0, Theme.Back));
+        TextRenderer.DrawText(g, label, Theme.Caption, labelRect, kindColor, Theme.Centered);
+
+        if (_tiles.Count > 64)
+            ClearTiles();
+        _tiles[(kind, size, cardBack)] = tile;
+        return tile;
+    }
+
+    private void ClearTiles()
+    {
+        foreach (var b in _tiles.Values)
+            b.Dispose();
+        _tiles.Clear();
     }
 
     private void PaintListHeader(Graphics g)
@@ -274,8 +397,8 @@ internal sealed class AssetGridView : Control
 
     private void PaintRow(Graphics g, AssetSummary item, int index, Rectangle r)
     {
-        var selected = index == _selected;
-        var hover = index == _hover;
+        var selected = IsSelected(index);
+        var hover = IsHovered(index);
         if (selected || hover)
             Theme.FillRounded(g, Rectangle.Inflate(r, 0, -Px(2)), Px(8), selected ? Theme.AccentSoft : Theme.Raised);
 
@@ -370,14 +493,23 @@ internal sealed class AssetGridView : Control
 
     protected override void OnMouseWheel(MouseEventArgs e)
     {
-        ClampScroll(_scrollBar.Value - e.Delta / 120 * (_mode == ViewMode.List ? RowHeight * 3 : RowHeight / 2));
+        _smooth.By(-e.Delta * Px(_mode == ViewMode.List ? 120 : 140) / 120);
         base.OnMouseWheel(e);
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
-        var hit = HitTest(e.Location);
-        var onCopy = hit >= 0 && CopyBounds(ItemBounds(hit)).Contains(e.Location);
+        UpdateHover(e.Location);
+        base.OnMouseMove(e);
+    }
+
+    /// <summary>Hover follows content under a still mouse while the view scrolls.</summary>
+    private void UpdateHover(Point location)
+    {
+        if (!ClientRectangle.Contains(location))
+            return;
+        var hit = HitTest(location);
+        var onCopy = hit >= 0 && CopyBounds(ItemBounds(hit)).Contains(location);
         if (hit != _hover || onCopy != _hoverCopy)
         {
             if (hit != _hover)
@@ -387,7 +519,6 @@ internal sealed class AssetGridView : Control
             Cursor = hit >= 0 ? Cursors.Hand : Cursors.Default;
             Invalidate();
         }
-        base.OnMouseMove(e);
     }
 
     protected override void OnMouseLeave(EventArgs e)

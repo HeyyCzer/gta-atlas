@@ -205,3 +205,51 @@ public sealed class DlcTableTests
         Assert.Equal((2, true), DlcTable.Toggle(1, false, 2)); // numbers: biggest first
     }
 }
+
+public sealed class ScrollAnimatorTests
+{
+    [Fact]
+    public void Eases_toward_target_and_settles_exactly()
+    {
+        var a = new GtaAtlas.App.Motion.ScrollAnimator();
+        a.ScrollTo(1000);
+
+        Assert.True(a.Step(16));
+        Assert.InRange(a.Position, 200, 300); // ~24% of the way per frame
+        for (var i = 0; i < 100 && a.Step(16); i++)
+        {
+        }
+        Assert.Equal(1000, a.Position);
+        Assert.False(a.Step(16));
+    }
+
+    [Fact]
+    public void Same_motion_regardless_of_frame_rate()
+    {
+        var fast = new GtaAtlas.App.Motion.ScrollAnimator();
+        var slow = new GtaAtlas.App.Motion.ScrollAnimator();
+        fast.ScrollTo(1000);
+        slow.ScrollTo(1000);
+
+        for (var i = 0; i < 4; i++)
+            fast.Step(8);
+        slow.Step(32);
+
+        Assert.Equal(slow.Position, fast.Position, 3);
+    }
+
+    [Fact]
+    public void Retargeting_keeps_current_position()
+    {
+        var a = new GtaAtlas.App.Motion.ScrollAnimator();
+        a.ScrollTo(100);
+        a.Step(16);
+        var mid = a.Position;
+        a.ScrollTo(500);
+
+        Assert.Equal(mid, a.Position);
+        a.Jump(42);
+        Assert.Equal((42d, 42d), (a.Position, a.Target));
+        Assert.False(a.IsAnimating);
+    }
+}
