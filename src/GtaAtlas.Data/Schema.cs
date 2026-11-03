@@ -71,8 +71,9 @@ internal static class Schema
 
         CREATE UNIQUE INDEX IF NOT EXISTS ux_asset_kind_key ON asset(kind, key);
         CREATE INDEX IF NOT EXISTS ix_asset_kind_dlc ON asset(kind, dlc_id);
-        CREATE INDEX IF NOT EXISTS ix_asset_kind_name ON asset(kind, name);
-        CREATE INDEX IF NOT EXISTS ix_asset_name ON asset(name);
+        -- Browse order: named assets first, hash-only names ("0x1A2B3C4D") last. Must match AssetQueries.BrowseOrder.
+        CREATE INDEX IF NOT EXISTS ix_asset_kind_name ON asset(kind, name GLOB '0x*', name);
+        CREATE INDEX IF NOT EXISTS ix_asset_name ON asset(name GLOB '0x*', name);
         CREATE INDEX IF NOT EXISTS ix_asset_hash ON asset(hash);
         CREATE INDEX IF NOT EXISTS ix_asset_parent ON asset(parent_id);
         CREATE UNIQUE INDEX IF NOT EXISTS ux_source_file_path ON source_file(path);

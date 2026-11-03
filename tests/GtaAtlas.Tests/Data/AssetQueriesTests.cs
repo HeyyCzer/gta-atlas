@@ -30,6 +30,7 @@ public sealed class AssetQueriesTests : IDisposable
         Asset(AssetKind.Prop, "prop_bench_01a", 2, DlcNames.Base, null, ["props_1"]),
         Asset(AssetKind.Prop, "v_med_bench1", 3, DlcNames.Base, null, ["props_2"]),
         Asset(AssetKind.Prop, "bench", 4, "mp2026_01", null, []),
+        Asset(AssetKind.Prop, "0x0000000A", 10, DlcNames.Base, null, []),
         Asset(AssetKind.AnimDict, "amb@world_human_seat", 5, DlcNames.Base, null, []),
         Asset(AssetKind.Anim, "amb@world_human_seat/idle_a", 6, DlcNames.Base, null, []) with
         {
@@ -104,11 +105,25 @@ public sealed class AssetQueriesTests : IDisposable
     }
 
     [Fact]
+    public void Results_carry_tags()
+    {
+        var r = _q.Search(new SearchQuery { Text = "veleno" });
+        Assert.Equal(["Grotti", "Super"], Assert.Single(r.Items).Tags.Order());
+    }
+
+    [Fact]
     public void Pages_results()
     {
         var page = _q.Search(new SearchQuery { Kind = AssetKind.Prop, Offset = 1, Limit = 1 });
-        Assert.Equal(3, page.Total);
+        Assert.Equal(4, page.Total);
         Assert.Equal("prop_bench_01a", Assert.Single(page.Items).Name);
+    }
+
+    [Fact]
+    public void Browse_lists_hash_only_names_last()
+    {
+        var r = _q.Search(new SearchQuery { Kind = AssetKind.Prop });
+        Assert.Equal(["bench", "prop_bench_01a", "v_med_bench1", "0x0000000A"], r.Items.Select(i => i.Name));
     }
 
     [Fact]

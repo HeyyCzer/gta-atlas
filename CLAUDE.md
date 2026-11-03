@@ -13,6 +13,7 @@ Plano e progresso: [ROADMAP.md](ROADMAP.md) — sempre ler antes de começar e a
 ## Comandos
 
 - Build: `dotnet build GtaAtlas.slnx`
+- App: `dotnet run --project src/GtaAtlas.App` (dados em `GTA_ATLAS_HOME` se definido)
 - Testes: `dotnet test --solution GtaAtlas.slnx` (xUnit v3 / Microsoft.Testing.Platform)
 - Clonar: `git clone --recurse-submodules` (ou `git submodule update --init`)
 

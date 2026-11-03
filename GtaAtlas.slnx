@@ -6,6 +6,9 @@
     <Project Path="external/CodeWalker/CodeWalker.Core/CodeWalker.Core.csproj" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/GtaAtlas.App/GtaAtlas.App.csproj">
+      <Platform Project="x64" />
+    </Project>
     <Project Path="src/GtaAtlas.Cli/GtaAtlas.Cli.csproj">
       <Platform Project="x64" />
     </Project>

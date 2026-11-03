@@ -11,6 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\GtaAtlas.App\GtaAtlas.App.csproj" />
     <ProjectReference Include="..\..\src\GtaAtlas.Core\GtaAtlas.Core.csproj" />
     <ProjectReference Include="..\..\src\GtaAtlas.Render\GtaAtlas.Render.csproj" />
     <ProjectReference Include="..\..\src\GtaAtlas.Indexer\GtaAtlas.Indexer.csproj" />

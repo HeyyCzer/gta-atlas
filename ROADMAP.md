@@ -25,7 +25,7 @@ GtaAtlas.sln
 ├─ src/GtaAtlas.Data       schema SQLite, migrations, repositórios, queries FTS
 ├─ src/GtaAtlas.Indexer    varre RPFs via GameFileCache/RpfManager → grava no DB (incremental)
 ├─ src/GtaAtlas.Render     fontes linkados do CodeWalker (abaixo) + Stubs.cs + ViewportForm : Form, DXForm + cenas + captura de thumbnails
-├─ src/GtaAtlas.App        UI WinForms (shell, listas, detalhes, viewport)
+├─ src/GtaAtlas.App        UI WinForms (shell, listas, detalhes, viewport); `Browsing/` = lógica testável sem UI
 └─ tests/GtaAtlas.Tests    testes de hash, parsing, queries
 ```
 
@@ -88,15 +88,16 @@ Cada fase termina em algo utilizável e verificável. Marque `[x]` ao concluir e
 **Pronto quando:** `atlas.db` gerado; contagens por kind/DLC batem aproximadamente com o plebmasters.
 
 ### Fase 2 — Shell da UI + navegação
-- [ ] Janela principal dark: sidebar (Props, Vehicles, Peds, Clothes, Animations, MLOs, IPLs, YMAPs, DLCs, Favoritos)
-- [ ] Barra superior: busca (debounce, FTS), filtros (DLC, categoria, gênero), chips de tags populares
-- [ ] Grid de cards **virtualizado** (owner-draw, só desenha visíveis) com nome, badge de DLC, tags, botão copiar
-- [ ] Alternar grid ↔ lista compacta
-- [ ] Painel/modal de detalhe: name, hash/int32/hex com copiar, display name, DLC, descrição, campos específicos
-- [ ] Atalhos: Ctrl+F, Enter abre, Ctrl+C copia nome, setas navegam
-- [ ] Favoritos persistidos no DB
-- [ ] Tela de primeira execução: escolher path → indexar com barra de progresso
-- [ ] Ícone do app (`.ico` multi-resolução 16–256 px) usado no exe, janela e taskbar; identidade visual própria (nada de logo Rockstar/GTA)
+- [x] Janela principal dark: sidebar (Props, Vehicles, Peds, Clothes, Animations, Anim dicts, MLOs, IPLs, YMAPs, All, DLCs, Favoritos) com contagens
+- [x] Barra superior: busca (debounce 150 ms, async, resultado velho descartado), filtros (DLC, gênero só em Clothes), chips das tags mais comuns do kind
+- [x] Grid de cards **virtualizado** (`AssetGridView` owner-draw, páginas de 200 sob demanda com LRU em `ResultPager`) com nome, subtítulo, tags, badge de DLC, botão copiar, tooltip
+- [x] Alternar grid ↔ lista compacta (Ctrl+L)
+- [x] Painel de detalhe: name, key, hash/int32/hex, display name, DLC, tags, JSON achatado (`AssetText.DataFields`), fontes; duplo-clique/Ctrl+C copia valor
+- [x] Atalhos: Ctrl+F, Enter/↓ na busca vai pro grid, Enter abre detalhe, Esc volta/limpa, Ctrl+C copia nome (clip = `dict clip`), Ctrl+D favorito, setas/PgUp/PgDn/Home/End
+- [x] Favoritos persistidos no DB
+- [x] Tela de primeira execução / Reindex: escolher/detectar pasta → indexar com barra de progresso (`IndexForm`); erros em `logs\index.log`
+- [x] Ícone do app (`Resources/atlas.ico` 16–256 px, gerado por `make-icon.py`): globo teal + marcador, sem marca Rockstar
+- [ ] Ordenação natural em nomes de roupa (`C/0/10/F` vem antes de `C/0/2/F`)
 
 **Pronto quando:** busca em ~50k props responde em < 50 ms, sem preview 3D ainda.
 
@@ -175,3 +176,4 @@ Referência de padrão: `..\grzyClothTool\CodeWalker\CodeWalker\CustomPedsForm.c
 - 2026-11-02 — Fase 1 fatia 1: props/MLOs/veículos/peds. Scan de todos os RPFs 4s, index total 29s, 161k assets. mp2026_01 bate com plebmasters (objects 1266, peds 9, MLOs 5; veículos 14 vs 13 — o extra é o trailer `trflat2`). Busca 25–50 ms. Indexer não usa `GameFileCache` (mescla e perde origem). DLCs `*_g9ec` são packs do Enhanced também presentes no Legacy.
 - 2026-11-02 — Fase 1 fatia 2: anims + ymaps. mp2026_01 bate 100% com plebmasters exceto trailer (anims 3216 incluindo cutscenes, YMAPs 19, IPLs 9). Performance: `YcdFile` completo era 90% do tempo → leitor enxuto (1564s→71s CPU). DB reconstruído em arquivo novo sem journal/índices e trocado no fim: escrita 90s→7s, 497→253 MB. Index total 32s (466k assets). Schema ainda não lançado → editar v1 direto e apagar DB local, sem migrations novas.
 - 2026-11-02 — Fase 1 concluída (roupas). Achados: (1) `dlclist.xml` mistura `<Item>`/`<item>` — parser pegava só metade; (2) ordem de carga real = setup2 `order` (confirmado pela numeração de roupas), mas patchdays com order baixo reenviam conteúdo de DLCs posteriores via RPFs `overlay=true` → regra geral: DLC que introduz um asset = primeira fonte fora de overlay (`DlcOverlays` lê content.xml); (3) packs `*_g9ec` são do Enhanced: no Legacy não entram na numeração de roupas e demais assets ganham tag `enhanced`. Referência de validação: `DurtyFree/gta-v-data-dumps` (`pedComponentVariations_free.json`, mesmo autor do plebmasters) — útil também para validar outras fases.
+- 2026-11-02 — Fase 2 concluída (falta só ordenação natural de roupas). Medido em 471k assets: browse por kind 100 ms → 5–9 ms (índices de expressão `(kind, name GLOB '0x*', name)` + count sem JOIN de dlc); nomes só-hash (`0x…`) vão pro fim; favoritos 632 → 16 ms (subquery partindo de `favorite`). Busca com palavra de 1–2 letras ainda ~250 ms (LIKE full scan) — UI é async, aceitável. `GetFolderPath` ignora `LOCALAPPDATA` → `GTA_ATLAS_HOME` sobrepõe a pasta de dados (testar primeira execução: `$env:GTA_ATLAS_HOME="..."`). `atlas search --repeat n` mede query quente.

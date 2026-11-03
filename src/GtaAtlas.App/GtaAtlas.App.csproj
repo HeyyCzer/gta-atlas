@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>GtaAtlas</AssemblyName>
+    <RootNamespace>GtaAtlas.App</RootNamespace>
+    <ApplicationIcon>Resources\atlas.ico</ApplicationIcon>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- SetColorMode is still experimental; WFO1000 is designer serialization, unused (no designer). -->
+    <NoWarn>$(NoWarn);WFO5001;WFO1000</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\atlas.ico" LogicalName="atlas.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GtaAtlas.Indexer\GtaAtlas.Indexer.csproj" />
+  </ItemGroup>
+
+</Project>

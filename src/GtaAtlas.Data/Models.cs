@@ -51,7 +51,11 @@ public sealed record AssetInput
     public IReadOnlyCollection<AssetSource> Sources { get; init; } = [];
 }
 
-public sealed record AssetSummary(long Id, string Kind, string Key, string Name, uint Hash, string? DisplayName, string Dlc);
+public sealed record AssetSummary(long Id, string Kind, string Key, string Name, uint Hash, string? DisplayName, string Dlc)
+{
+    /// <summary>Filled by search results (for cards); empty elsewhere.</summary>
+    public IReadOnlyList<string> Tags { get; init; } = [];
+}
 
 public sealed record AssetDetail(AssetSummary Asset, string? Data, IReadOnlyList<string> Tags, IReadOnlyList<AssetSource> Sources, AssetSummary? Parent);
 

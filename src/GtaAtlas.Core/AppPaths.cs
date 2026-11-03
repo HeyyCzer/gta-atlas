@@ -8,8 +8,13 @@ public sealed class AppPaths
         Root = root;
     }
 
+    /// <summary>Environment variable that relocates all user data (portable installs, testing a first run).</summary>
+    public const string HomeVariable = "GTA_ATLAS_HOME";
+
     public static AppPaths Default { get; } = new(
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GtaAtlas"));
+        Environment.GetEnvironmentVariable(HomeVariable) is { Length: > 0 } home
+            ? home
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GtaAtlas"));
 
     public string Root { get; }
     public string SettingsFile => Path.Combine(Root, "settings.json");

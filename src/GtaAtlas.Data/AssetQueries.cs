@@ -5,6 +5,9 @@ namespace GtaAtlas.Data;
 
 public sealed class AssetQueries(AtlasDb db)
 {
+    /// <summary>Named assets first, then hash-only names; matches the expression indexes in <see cref="Schema"/>.</summary>
+    private const string BrowseOrder = "ORDER BY a.name GLOB '0x*', a.name";
+
     private const string SummaryColumns = "a.id AS Id, a.kind AS Kind, a.key AS Key, a.name AS Name, a.hash AS Hash, a.display_name AS DisplayName, d.name AS Dlc";
 
     public SearchResult Search(SearchQuery q)
@@ -34,13 +37,14 @@ public sealed class AssetQueries(AtlasDb db)
             p.Add($"tag{i}", q.Tags[i]);
         }
         if (q.FavoritesOnly)
-            where.Append(" AND EXISTS (SELECT 1 FROM favorite f WHERE f.kind = a.kind AND f.key = a.key)");
+            // Drive from the (small) favorite table through ux_asset_kind_key instead of probing it per asset.
+            where.Append(" AND a.id IN (SELECT fa.id FROM favorite f JOIN asset fa ON fa.kind = f.kind AND fa.key = f.key)");
         if (!string.IsNullOrEmpty(text))
             where.Append(" AND (").Append(TextCondition(text, p)).Append(')');
 
         var from = $"FROM asset a WHERE {where}";
         var order = string.IsNullOrEmpty(text)
-            ? "ORDER BY a.name"
+            ? BrowseOrder
             : "ORDER BY (a.name = @exact COLLATE NOCASE) DESC, (a.name LIKE @prefix) DESC, length(a.name), a.name";
         p.Add("exact", text);
         p.Add("prefix", LikeEscape(text ?? "") + "%");
@@ -51,7 +55,10 @@ public sealed class AssetQueries(AtlasDb db)
         // Count and page without the dlc join so plain filters stay index-only; DLC names are joined onto the page.
         var total = c.ExecuteScalar<int>($"SELECT COUNT(*) {from}", p);
         var rows = c.Query<SummaryRow>(
-            $"SELECT {SummaryColumns} FROM (SELECT a.* {from} {order} LIMIT @limit OFFSET @offset) a JOIN dlc d ON d.id = a.dlc_id {order}", p);
+            $"""
+            SELECT {SummaryColumns}, (SELECT group_concat(t.tag, char(31)) FROM asset_tag t WHERE t.asset_id = a.id) AS TagList
+            FROM (SELECT a.* {from} {order} LIMIT @limit OFFSET @offset) a JOIN dlc d ON d.id = a.dlc_id {order}
+            """, p);
         return new SearchResult(rows.Select(r => r.ToSummary()).ToList(), total);
     }
 
@@ -170,7 +177,11 @@ public sealed class AssetQueries(AtlasDb db)
         public string Dlc { get; init; } = "";
         public string? Data { get; init; }
         public long? ParentId { get; init; }
+        public string? TagList { get; init; }
 
-        public AssetSummary ToSummary() => new(Id, Kind, Key, Name, unchecked((uint)Hash), DisplayName, Dlc);
+        public AssetSummary ToSummary() => new(Id, Kind, Key, Name, unchecked((uint)Hash), DisplayName, Dlc)
+        {
+            Tags = TagList?.Split('') ?? [],
+        };
     }
 }
