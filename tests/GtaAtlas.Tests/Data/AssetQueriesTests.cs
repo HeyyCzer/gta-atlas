@@ -14,7 +14,7 @@ public sealed class AssetQueriesTests : IDisposable
     {
         _db = AtlasDb.Open(_dir.Sub("atlas.db"));
         _q = new AssetQueries(_db);
-        IndexWriter.ReplaceAll(_db, Dlcs, Sample());
+        IndexWriter.Rebuild(_db, Dlcs, Sample());
     }
 
     public void Dispose()
@@ -147,7 +147,7 @@ public sealed class AssetQueriesTests : IDisposable
     public void Favorites_survive_reindex()
     {
         _q.SetFavorite(AssetKind.Vehicle, "velenogt", true);
-        IndexWriter.ReplaceAll(_db, Dlcs, Sample());
+        IndexWriter.Rebuild(_db, Dlcs, Sample());
 
         Assert.True(_q.IsFavorite(AssetKind.Vehicle, "velenogt"));
         Assert.Equal("velenogt", Assert.Single(_q.Search(new SearchQuery { FavoritesOnly = true }).Items).Name);
@@ -159,7 +159,7 @@ public sealed class AssetQueriesTests : IDisposable
     [Fact]
     public void Reindex_replaces_previous_content()
     {
-        IndexWriter.ReplaceAll(_db, Dlcs, Sample().Take(1).ToList());
+        IndexWriter.Rebuild(_db, Dlcs, Sample().Take(1).ToList());
 
         Assert.Equal(1, _q.Search(new SearchQuery()).Total);
         Assert.Equal(0, _q.Search(new SearchQuery { Text = "bench" }).Total);

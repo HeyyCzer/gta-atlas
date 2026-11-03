@@ -15,7 +15,7 @@ public sealed record IndexResult(bool Skipped, int Assets, int Errors);
 public static class GameIndexer
 {
     /// <summary>Bump when extractors change so existing databases get rebuilt.</summary>
-    public const int Version = 1;
+    public const int Version = 3;
 
     public const string FingerprintKey = "fingerprint";
 
@@ -49,10 +49,12 @@ public static class GameIndexer
             .ToList();
 
         var raws = new ConcurrentBag<RawAsset>();
+        var ticks = new ConcurrentDictionary<string, long>();
         var done = 0;
         progress?.Report(new IndexProgress("Extracting", 0, work.Count));
         Parallel.ForEach(work, w =>
         {
+            var started = Stopwatch.GetTimestamp();
             try
             {
                 foreach (var raw in w.Extractor!.Extract(w.Entry, text))
@@ -63,21 +65,26 @@ public static class GameIndexer
                 Error($"{w.Entry.Path}: {e.Message}");
             }
 
+            ticks.AddOrUpdate(w.Extractor!.GetType().Name, Stopwatch.GetTimestamp() - started, (_, v) => v + Stopwatch.GetTimestamp() - started);
             var n = Interlocked.Increment(ref done);
             if (n % 1000 == 0)
                 progress?.Report(new IndexProgress("Extracting", n, work.Count));
         });
 
+        foreach (var (name, total) in ticks.OrderByDescending(t => t.Value))
+            progress?.Report(new IndexProgress($"  {name}: {Stopwatch.GetElapsedTime(0, total).TotalSeconds:0}s cpu"));
         progress?.Report(new IndexProgress("Merging"));
         dlcs = DlcCatalog.WithUnlisted(dlcs, raws.Select(r => r.Dlc));
         var assets = AssetMerger.Merge(raws, dlcs);
 
         progress?.Report(new IndexProgress("Writing database", 0, assets.Count));
-        IndexWriter.ReplaceAll(db, dlcs, assets);
-        db.SetMeta(FingerprintKey, fingerprint);
-        db.SetMeta("indexed_at", DateTime.UtcNow.ToString("O"));
-        db.SetMeta("game_version", FileVersionInfo.GetVersionInfo(session.Install.ExePath).FileVersion ?? "");
-        db.SetMeta("game_folder", session.Install.Folder);
+        IndexWriter.Rebuild(db, dlcs, assets, new Dictionary<string, string>
+        {
+            [FingerprintKey] = fingerprint,
+            ["indexed_at"] = DateTime.UtcNow.ToString("O"),
+            ["game_version"] = FileVersionInfo.GetVersionInfo(session.Install.ExePath).FileVersion ?? "",
+            ["game_folder"] = session.Install.Folder,
+        });
 
         return new IndexResult(false, assets.Count, errors);
     }

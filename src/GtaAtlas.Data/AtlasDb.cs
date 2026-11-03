@@ -41,6 +41,15 @@ public sealed class AtlasDb
         return connection;
     }
 
+    /// <summary>Connection tuned for a one-shot build of a throwaway file: no journal, no fsync.</summary>
+    internal SqliteConnection ConnectForBulkLoad()
+    {
+        var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+        connection.Execute("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -262144;");
+        return connection;
+    }
+
     public int SchemaVersion
     {
         get

@@ -3,21 +3,60 @@ using Microsoft.Data.Sqlite;
 
 namespace GtaAtlas.Data;
 
-/// <summary>Replaces the whole index in one transaction (readers keep seeing the old data until commit).</summary>
+/// <summary>
+/// Rebuilds the index into a fresh file and swaps it in place of the live database.
+/// Bulk load runs without journal or secondary indexes, which is several times faster than
+/// deleting and re-inserting, and leaves no free pages behind (no VACUUM needed).
+/// Favorites are carried over from the previous database.
+/// </summary>
 public static class IndexWriter
 {
-    public static void ReplaceAll(AtlasDb db, IReadOnlyList<DlcInput> dlcs, IReadOnlyCollection<AssetInput> assets)
+    public static void Rebuild(AtlasDb db, IReadOnlyList<DlcInput> dlcs, IReadOnlyCollection<AssetInput> assets,
+        IReadOnlyDictionary<string, string>? meta = null)
     {
-        using var c = db.Connect();
-        using var tx = c.BeginTransaction();
+        var buildPath = db.Path + ".building";
+        DeleteDatabaseFiles(buildPath);
 
-        c.Execute("DELETE FROM asset_fts; DELETE FROM asset_tag; DELETE FROM asset_source; DELETE FROM asset; DELETE FROM dlc;", transaction: tx);
+        var build = AtlasDb.Open(buildPath);
+        SqliteConnection.ClearAllPools(); // leaving WAL mode needs the migration connection gone
+        using (var c = build.ConnectForBulkLoad())
+        {
+            c.Execute(Schema.DropIndexes);
+            using (var tx = c.BeginTransaction())
+            {
+                var dlcIds = InsertDlcs(c, tx, dlcs);
+                var assetIds = InsertAssets(c, tx, assets, dlcIds);
+                LinkParents(c, tx, assets, assetIds);
+                CopyFavorites(c, tx, db);
+                foreach (var (key, value) in meta ?? new Dictionary<string, string>())
+                    c.Execute("INSERT OR REPLACE INTO meta(key, value) VALUES (@key, @value)", new { key, value }, tx);
+                tx.Commit();
+            }
+            c.Execute(Schema.Indexes);
+            c.Execute("INSERT INTO asset_fts(asset_fts) VALUES ('optimize'); PRAGMA optimize;");
+        }
 
-        var dlcIds = InsertDlcs(c, tx, dlcs);
-        var assetIds = InsertAssets(c, tx, assets, dlcIds);
-        LinkParents(c, tx, assets, assetIds);
+        SqliteConnection.ClearAllPools();
+        DeleteDatabaseFiles(db.Path, keepMain: true);
+        File.Move(buildPath, db.Path, overwrite: true);
+    }
 
-        tx.Commit();
+    private static void CopyFavorites(SqliteConnection c, SqliteTransaction tx, AtlasDb live)
+    {
+        if (!File.Exists(live.Path))
+            return;
+        using var old = live.Connect();
+        var favorites = old.Query<(string Kind, string Key)>("SELECT kind, key FROM favorite").ToList();
+        foreach (var (kind, key) in favorites)
+            c.Execute("INSERT OR IGNORE INTO favorite(kind, key) VALUES (@kind, @key)", new { kind, key }, tx);
+    }
+
+    private static void DeleteDatabaseFiles(string path, bool keepMain = false)
+    {
+        if (!keepMain)
+            File.Delete(path);
+        File.Delete(path + "-wal");
+        File.Delete(path + "-shm");
     }
 
     private static Dictionary<string, long> InsertDlcs(SqliteConnection c, SqliteTransaction tx, IReadOnlyList<DlcInput> dlcs)
@@ -39,11 +78,14 @@ public static class IndexWriter
         SqliteConnection c, SqliteTransaction tx, IReadOnlyCollection<AssetInput> assets, Dictionary<string, long> dlcIds)
     {
         using var insertAsset = Prepare(c, tx,
-            "INSERT INTO asset(kind, key, name, hash, display_name, dlc_id, data) VALUES ($kind, $key, $name, $hash, $display, $dlc, $data) RETURNING id",
-            "$kind", "$key", "$name", "$hash", "$display", "$dlc", "$data");
+            "INSERT INTO asset(id, kind, key, name, hash, display_name, dlc_id, data) VALUES ($id, $kind, $key, $name, $hash, $display, $dlc, $data)",
+            "$id", "$kind", "$key", "$name", "$hash", "$display", "$dlc", "$data");
+        using var insertFile = Prepare(c, tx,
+            "INSERT INTO source_file(id, dlc_id, path) VALUES ($id, $dlc, $path)",
+            "$id", "$dlc", "$path");
         using var insertSource = Prepare(c, tx,
-            "INSERT OR IGNORE INTO asset_source(asset_id, dlc_id, path) VALUES ($asset, $dlc, $path)",
-            "$asset", "$dlc", "$path");
+            "INSERT OR IGNORE INTO asset_source(asset_id, file_id) VALUES ($asset, $file)",
+            "$asset", "$file");
         using var insertTag = Prepare(c, tx,
             "INSERT OR IGNORE INTO asset_tag(asset_id, tag) VALUES ($asset, $tag)",
             "$asset", "$tag");
@@ -52,19 +94,30 @@ public static class IndexWriter
             "$id", "$name", "$display", "$tags");
 
         var ids = new Dictionary<(string, string), long>(assets.Count);
+        var files = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        long nextId = 0;
         foreach (var a in assets)
         {
-            var dlcId = DlcId(dlcIds, a.Dlc);
-            var tags = a.Tags.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var id = ++nextId;
+            if (!ids.TryAdd((a.Kind, a.Key), id))
+                throw new InvalidOperationException($"Duplicate asset {a.Kind}/{a.Key}.");
 
-            var id = (long)Run(insertAsset, a.Kind, a.Key, a.Name, (long)a.Hash, a.DisplayName, dlcId, a.Data)!;
-            ids[(a.Kind, a.Key)] = id;
+            var tags = a.Tags.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            Run(insertAsset, id, a.Kind, a.Key, a.Name, (long)a.Hash, a.DisplayName, DlcId(dlcIds, a.Dlc), a.Data);
 
             foreach (var s in a.Sources)
-                RunNonQuery(insertSource, id, DlcId(dlcIds, s.Dlc), s.Path);
+            {
+                if (!files.TryGetValue(s.Path, out var fileId))
+                {
+                    fileId = files.Count + 1;
+                    files[s.Path] = fileId;
+                    Run(insertFile, fileId, DlcId(dlcIds, s.Dlc), s.Path);
+                }
+                Run(insertSource, id, fileId);
+            }
             foreach (var t in tags)
-                RunNonQuery(insertTag, id, t);
-            RunNonQuery(insertFts, id, a.Name, a.DisplayName, string.Join(' ', tags));
+                Run(insertTag, id, t);
+            Run(insertFts, id, a.Name, a.DisplayName, string.Join(' ', tags));
         }
         return ids;
     }
@@ -75,7 +128,7 @@ public static class IndexWriter
         foreach (var a in assets)
         {
             if (a.Parent is { } p && ids.TryGetValue(p, out var parentId))
-                RunNonQuery(update, parentId, ids[(a.Kind, a.Key)]);
+                Run(update, parentId, ids[(a.Kind, a.Key)]);
         }
     }
 
@@ -93,21 +146,10 @@ public static class IndexWriter
         return cmd;
     }
 
-    private static void Bind(SqliteCommand cmd, object?[] values)
+    private static void Run(SqliteCommand cmd, params object?[] values)
     {
         for (var i = 0; i < values.Length; i++)
             cmd.Parameters[i].Value = values[i] ?? DBNull.Value;
-    }
-
-    private static object? Run(SqliteCommand cmd, params object?[] values)
-    {
-        Bind(cmd, values);
-        return cmd.ExecuteScalar();
-    }
-
-    private static void RunNonQuery(SqliteCommand cmd, params object?[] values)
-    {
-        Bind(cmd, values);
         cmd.ExecuteNonQuery();
     }
 }

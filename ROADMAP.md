@@ -77,9 +77,9 @@ Cada fase termina em algo utilizável e verificável. Marque `[x]` ao concluir e
 - [x] Veículos: `vehicles.meta` + nomes GXT2 (display name, fabricante, classe, tipo, modkits). `carcols`/`carvariations` → Fase 5
 - [x] Peds: `peds.meta`/`peds.ymt` (nome, pedType, clipsets)
 - [ ] Roupas: `.ymt` de shop/ped components (componente, drawable, textura, gênero, nome via GXT quando houver)
-- [ ] Animações: `.ycd` → dicionários e clips (nome, duração)
+- [x] Animações: `.ycd` → dicionários e clips (nome, duração), incluindo cutscenes (tag `cutscene`). Leitor próprio `YcdClipReader` (só nomes/durações), validado contra `YcdFile` em teste
 - [x] MLOs: archetypes `CMloArchetypeDef` (rooms, portals, entity sets)
-- [ ] YMAPs / IPLs: lista de `.ymap`, agrupamento em IPLs (por nome/`_manifest.ymf`), centro/extents
+- [x] YMAPs / IPLs: todo `.ymap` (extents, parent, flags, contagens). IPL = tag `ipl` quando `flags & 1` (script-managed) e não LOD (`contentFlags & 2`)
 - [x] Hashes: unsigned no DB; busca aceita decimal, int32 e hex (`HashText`)
 - [x] Reindex: fingerprint (SHA256 de path/size/mtime de todos os RPFs + `GameIndexer.Version`) → pula se igual. Rebuild sempre total (~30s), mais simples e correto que incremental por arquivo
 - [x] Tags automáticas (fabricante, classe, tipo de veículo, pedType, ytyp, assetType)
@@ -96,6 +96,7 @@ Cada fase termina em algo utilizável e verificável. Marque `[x]` ao concluir e
 - [ ] Atalhos: Ctrl+F, Enter abre, Ctrl+C copia nome, setas navegam
 - [ ] Favoritos persistidos no DB
 - [ ] Tela de primeira execução: escolher path → indexar com barra de progresso
+- [ ] Ícone do app (`.ico` multi-resolução 16–256 px) usado no exe, janela e taskbar; identidade visual própria (nada de logo Rockstar/GTA)
 
 **Pronto quando:** busca em ~50k props responde em < 50 ms, sem preview 3D ainda.
 
@@ -172,3 +173,4 @@ Referência de padrão: `..\grzyClothTool\CodeWalker\CodeWalker\CustomPedsForm.c
 - 2026-11-02 — Teste de port: `Rendering/**` + 5 arquivos + 2 stubs compilam em net10 com 0 erros, sem editar upstream. Decidido port nativo por link de arquivos (sem DLL net48).
 - 2026-11-02 — Fase 0 concluída. 14 testes verdes (inclui integração com jogo real). Achado: `x64a.rpf` não tem RPFs aninhados. Leitura de chaves a partir do exe leva ~2s; cache em `settings.json`.
 - 2026-11-02 — Fase 1 fatia 1: props/MLOs/veículos/peds. Scan de todos os RPFs 4s, index total 29s, 161k assets. mp2026_01 bate com plebmasters (objects 1266, peds 9, MLOs 5; veículos 14 vs 13 — o extra é o trailer `trflat2`). Busca 25–50 ms. Indexer não usa `GameFileCache` (mescla e perde origem). DLCs `*_g9ec` são packs do Enhanced também presentes no Legacy.
+- 2026-11-02 — Fase 1 fatia 2: anims + ymaps. mp2026_01 bate 100% com plebmasters exceto trailer (anims 3216 incluindo cutscenes, YMAPs 19, IPLs 9). Performance: `YcdFile` completo era 90% do tempo → leitor enxuto (1564s→71s CPU). DB reconstruído em arquivo novo sem journal/índices e trocado no fim: escrita 90s→7s, 497→253 MB. Index total 32s (466k assets). Schema ainda não lançado → editar v1 direto e apagar DB local, sem migrations novas.

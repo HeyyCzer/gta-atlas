@@ -96,7 +96,11 @@ public sealed class AssetQueries(AtlasDb db)
 
         var tags = c.Query<string>("SELECT tag FROM asset_tag WHERE asset_id = @id ORDER BY tag", new { id }).ToList();
         var sources = c.Query<(string Dlc, string Path)>(
-                "SELECT d.name, s.path FROM asset_source s JOIN dlc d ON d.id = s.dlc_id WHERE s.asset_id = @id ORDER BY d.order_index, s.path", new { id })
+                """
+                SELECT d.name, f.path FROM asset_source s
+                JOIN source_file f ON f.id = s.file_id JOIN dlc d ON d.id = f.dlc_id
+                WHERE s.asset_id = @id ORDER BY d.order_index, f.path
+                """, new { id })
             .Select(s => new AssetSource(s.Dlc, s.Path)).ToList();
         var parent = row.ParentId is { } pid ? Get(pid)?.Asset : null;
         return new AssetDetail(row.ToSummary(), row.Data, tags, sources, parent);

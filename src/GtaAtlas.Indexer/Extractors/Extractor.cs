@@ -37,5 +37,7 @@ public static class ExtractorSet
         new ArchetypeExtractor(),
         new VehicleExtractor(),
         new PedExtractor(),
+        new AnimExtractor(),
+        new YmapExtractor(),
     ];
 }
