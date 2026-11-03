@@ -1,11 +1,12 @@
 using GtaAtlas.App.Browsing;
 using GtaAtlas.App.Ui.Controls;
 using GtaAtlas.Data;
+using GtaAtlas.Render;
 
 namespace GtaAtlas.App.Ui;
 
 /// <summary>
-/// Modal detail window for one asset: preview on the left (3D viewport in Phase 3), info on the right.
+/// Modal detail window for one asset: 3D preview on the left (props and vehicles), info on the right.
 /// ←/→ step through the current result list, Esc closes.
 /// </summary>
 internal sealed class DetailForm : Form
@@ -14,7 +15,7 @@ internal sealed class DetailForm : Form
     private readonly Func<int, AssetSummary?> _itemAt;
     private readonly int _count;
 
-    private readonly PreviewPane _preview = new() { Dock = DockStyle.Fill };
+    private readonly PreviewPane _preview;
     private readonly DetailHeader _header = new() { Dock = DockStyle.Top };
     private readonly PillButton _favorite = new() { Icon = Glyph.Star, Text = "Favorite" };
     private readonly PillButton _copyName = new() { Icon = Glyph.Copy, Text = "Copy name", Primary = true };
@@ -24,8 +25,9 @@ internal sealed class DetailForm : Form
     private AssetDetail? _detail;
     private bool _isFavorite;
 
-    public DetailForm(AssetQueries queries, Func<int, AssetSummary?> itemAt, int count, int index)
+    public DetailForm(AssetQueries queries, GameAssets? assets, Func<int, AssetSummary?> itemAt, int count, int index)
     {
+        _preview = new PreviewPane(assets) { Dock = DockStyle.Fill };
         _queries = queries;
         _itemAt = itemAt;
         _count = count;
@@ -198,13 +200,24 @@ internal sealed class DetailForm : Form
         }
     }
 
-    /// <summary>Left area: preview placeholder until the 3D viewport lands, position and prev/next.</summary>
+    /// <summary>
+    /// Left area: 3D viewport for kinds it can show (placeholder with status otherwise), position and prev/next.
+    /// The viewport is a native D3D window that nothing can be painted over, so the arrows live in the footer.
+    /// </summary>
     private sealed class PreviewPane : ThemedControl
     {
+        private readonly GameAssets? _assets;
+        private ModelViewport? _viewport;
         private AssetSummary? _item;
         private int _index;
         private int _count;
         private int _hoverArrow;
+        private string _message = "";
+
+        public PreviewPane(GameAssets? assets)
+        {
+            _assets = assets;
+        }
 
         public event EventHandler<int>? Navigate;
 
@@ -213,11 +226,79 @@ internal sealed class DetailForm : Form
             _item = item;
             _index = index;
             _count = count;
+            ShowModel(item);
             Invalidate();
         }
 
+        private void ShowModel(AssetSummary item)
+        {
+            var supported = item.Kind is AssetKind.Prop or AssetKind.Vehicle;
+            if (!supported || _assets is null)
+            {
+                _message = supported ? "3D preview needs the game folder" : "3D preview coming soon";
+                if (_viewport is not null)
+                {
+                    _viewport.Clear();
+                    _viewport.Visible = false;
+                }
+                return;
+            }
+
+            if (_viewport is null)
+            {
+                _viewport = new ModelViewport(_assets, Rectangle.Inflate(Stage, -1, -1).Size);
+                _viewport.ItemLoaded += (_, error) =>
+                {
+                    _message = $"Preview unavailable: {error}";
+                    _viewport.Visible = error is null;
+                    Invalidate();
+                };
+                Controls.Add(_viewport);
+                LayoutViewport();
+            }
+            _message = _assets.Ready.IsCompleted ? "Loading model…" : "Loading game files…";
+            if (item.Kind == AssetKind.Vehicle)
+                _viewport.ShowVehicle(item.Name);
+            else
+                _viewport.ShowProp(item.Hash);
+            if (!_assets.Ready.IsCompleted)
+                _ = RepaintWhileScanning();
+        }
+
+        /// <summary>Repaints the cache scan status until the game files are ready.</summary>
+        private async Task RepaintWhileScanning()
+        {
+            while (_assets is { Ready.IsCompleted: false } && !IsDisposed)
+            {
+                Invalidate();
+                await Task.Delay(250);
+            }
+        }
+
         private Rectangle Stage => new(Px(24), Px(24), Width - Px(48), Height - Px(80));
-        private Rectangle Arrow(int dir) => new(dir < 0 ? Stage.X + Px(14) : Stage.Right - Px(54), Stage.Y + Stage.Height / 2 - Px(20), Px(40), Px(40));
+        private Rectangle Arrow(int dir) => new(Stage.X + (dir < 0 ? 0 : Px(40)), Stage.Bottom + Px(12), Px(34), Px(30));
+
+        private void LayoutViewport()
+        {
+            if (_viewport is not null)
+                _viewport.Bounds = Rectangle.Inflate(Stage, -1, -1);
+        }
+
+        protected override void OnLayout(LayoutEventArgs e)
+        {
+            base.OnLayout(e);
+            LayoutViewport();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && _viewport is not null)
+            {
+                _viewport.Close(); // releases the D3D device; a child form is not closed with its parent
+                _viewport.Dispose();
+            }
+            base.Dispose(disposing);
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -238,25 +319,31 @@ internal sealed class DetailForm : Form
                 using var pen = new Pen(Theme.Border);
                 g.DrawPath(pen, path);
             }
-            var icon = new Rectangle(stage.X, stage.Y + stage.Height / 2 - Px(70), stage.Width, Px(100));
-            using (var big = new Font(Theme.IconLarge.FontFamily, 54f))
-                Theme.DrawIcon(g, AssetGridView.KindGlyph(_item.Kind), icon, Color.FromArgb(0xA0, color), big);
-            TextRenderer.DrawText(g, "3D preview coming soon", Theme.UiFont, new Rectangle(stage.X, icon.Bottom + Px(8), stage.Width, Px(24)), Theme.Faint, Theme.Centered);
+            var showing = _viewport is { Visible: true };
+            if (!showing)
+            {
+                var icon = new Rectangle(stage.X, stage.Y + stage.Height / 2 - Px(70), stage.Width, Px(100));
+                using (var big = new Font(Theme.IconLarge.FontFamily, 54f))
+                    Theme.DrawIcon(g, AssetGridView.KindGlyph(_item.Kind), icon, Color.FromArgb(0xA0, color), big);
+                var text = _assets is { Ready.IsCompleted: false } && _viewport is not null ? $"{_message}\n{_assets.Status}" : _message;
+                TextRenderer.DrawText(g, text, Theme.UiFont, new Rectangle(stage.X + Px(16), icon.Bottom + Px(8), stage.Width - Px(32), Px(48)), Theme.Faint,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            }
 
             foreach (var dir in new[] { -1, 1 })
             {
-                var enabled = dir < 0 ? _index > 0 : _index < _count - 1;
-                if (!enabled)
-                    continue;
                 var r = Arrow(dir);
-                Theme.FillRounded(g, r, r.Height / 2, _hoverArrow == dir ? Theme.Hover : Theme.Raised, Theme.Border);
-                Theme.DrawIcon(g, dir < 0 ? Glyph.ChevronLeft : Glyph.ChevronRight, r, Theme.Text);
+                var enabled = dir < 0 ? _index > 0 : _index < _count - 1;
+                Theme.FillRounded(g, r, Px(8), enabled && _hoverArrow == dir ? Theme.Hover : Theme.Raised, Theme.Border);
+                Theme.DrawIcon(g, dir < 0 ? Glyph.ChevronLeft : Glyph.ChevronRight, r, enabled ? Theme.Text : Theme.Faint);
             }
 
-            var footer = new Rectangle(stage.X, stage.Bottom + Px(12), stage.Width, Px(32));
+            var footer = new Rectangle(Arrow(1).Right + Px(12), stage.Bottom + Px(12), stage.Right - Arrow(1).Right - Px(12), Px(30));
             TextRenderer.DrawText(g, $"{_index + 1:N0} of {_count:N0}", Theme.Bold, footer, Theme.Muted, Theme.Line);
-            TextRenderer.DrawText(g, "←  →  browse     Ctrl+C  copy name     Ctrl+D  favorite     Esc  close", Theme.Small, footer, Theme.Faint,
-                Theme.Line | TextFormatFlags.Right);
+            var hints = showing
+                ? "Drag  orbit     Right-drag  pan     Wheel  zoom     R  reset     ←  →  browse     Esc  close"
+                : "←  →  browse     Ctrl+C  copy name     Ctrl+D  favorite     Esc  close";
+            TextRenderer.DrawText(g, hints, Theme.Small, footer, Theme.Faint, Theme.Line | TextFormatFlags.Right);
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
@@ -274,6 +361,7 @@ internal sealed class DetailForm : Form
         protected override void OnMouseLeave(EventArgs e)
         {
             _hoverArrow = 0;
+            Invalidate();
             base.OnMouseLeave(e);
         }
 

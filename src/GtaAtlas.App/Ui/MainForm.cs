@@ -2,8 +2,10 @@ using System.Diagnostics;
 using GtaAtlas.App.Browsing;
 using GtaAtlas.App.Ui.Controls;
 using GtaAtlas.Core;
+using GtaAtlas.Core.Game;
 using GtaAtlas.Data;
 using GtaAtlas.Indexer;
+using GtaAtlas.Render;
 
 namespace GtaAtlas.App.Ui;
 
@@ -40,6 +42,7 @@ internal sealed class MainForm : Form
     private IReadOnlyDictionary<string, int> _counts = new Dictionary<string, int>();
     private Dictionary<Category, int> _taggedCounts = [];
     private int _generation;
+    private GameAssets? _assets;
 
     public MainForm(AppPaths paths, AtlasSettings settings, AtlasDb db)
     {
@@ -177,6 +180,27 @@ internal sealed class MainForm : Form
         LoadCatalog();
         SetCategory(Category.Props);
         _grid.Focus();
+        StartGameAssets();
+    }
+
+    /// <summary>Starts loading the game file cache for 3D previews; takes ~10 s, so it runs while the user browses.</summary>
+    private async void StartGameAssets()
+    {
+        try
+        {
+            var install = await Task.Run(() => GameSession.Open(_paths, _settings).Install);
+            _assets = GameAssets.Start(install, error => AppLog.Write("game", [error]));
+        }
+        catch (Exception e)
+        {
+            AppLog.Write("game", [e.ToString()]);
+        }
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        _assets?.Dispose();
+        base.OnFormClosed(e);
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -323,7 +347,7 @@ internal sealed class MainForm : Form
         if (_grid.SelectedIndex < 0)
             return;
         var favoritesChanged = false;
-        using var form = new DetailForm(_queries, _grid.ItemAt, _grid.Count, _grid.SelectedIndex);
+        using var form = new DetailForm(_queries, _assets, _grid.ItemAt, _grid.Count, _grid.SelectedIndex);
         form.FavoritesChanged += (_, _) => favoritesChanged = true;
         form.ShowDialog(this);
         _grid.SelectedIndex = form.Index;

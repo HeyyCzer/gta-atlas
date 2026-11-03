@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GtaAtlas.Indexer\GtaAtlas.Indexer.csproj" />
+    <ProjectReference Include="..\GtaAtlas.Render\GtaAtlas.Render.csproj" />
   </ItemGroup>
 
 </Project>
