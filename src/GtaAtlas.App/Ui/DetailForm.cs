@@ -246,7 +246,7 @@ internal sealed class DetailForm : Form
 
             if (_viewport is null)
             {
-                _viewport = new ModelViewport(_assets, Rectangle.Inflate(Stage, -1, -1).Size);
+                _viewport = new ModelViewport(_assets, Rectangle.Inflate(Stage, -1, -1).Size) { Background = Theme.Surface };
                 _viewport.ItemLoaded += (_, error) =>
                 {
                     _message = $"Preview unavailable: {error}";
