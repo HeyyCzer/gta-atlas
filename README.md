@@ -85,7 +85,7 @@ Requires the .NET 10 SDK. If you set `GTA_ATLAS_HOME`, the app uses that folder 
 | `src/GtaAtlas.Cli` | `atlas` command-line tool |
 | `external/CodeWalker` | Upstream [CodeWalker](https://github.com/dexyfex/CodeWalker) as a git submodule, unmodified |
 
-The UI never scans the game. Lists and search come from SQLite; the game is only opened to index, to load the asset in the viewport and to render missing thumbnails. See [ROADMAP.md](ROADMAP.md) for the plan and progress notes (in Portuguese).
+The UI never scans the game. Lists and search come from SQLite; the game is only opened to index, to load the asset in the viewport and to render missing thumbnails. See [ROADMAP.md](ROADMAP.md) for the plan and progress notes.
 
 ### Releasing
 

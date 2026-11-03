@@ -1,192 +1,195 @@
 # GTA Atlas — Roadmap
 
-Ferramenta desktop local (alternativa ao forge.plebmasters.de) para explorar assets do GTA V:
-props, veículos, peds, roupas, animações, MLOs, IPLs, YMAPs e DLCs — com busca instantânea e preview 3D interativo.
+Local desktop tool (an alternative to forge.plebmasters.de) for exploring GTA V assets:
+props, vehicles, peds, clothing, animations, MLOs, IPLs, YMAPs and DLCs — with instant search and an interactive 3D preview.
 
-## Decisões fixas
+## Fixed decisions
 
-| Tema | Decisão |
+| Topic | Decision |
 |---|---|
 | Runtime | .NET 10, WinForms (`net10.0-windows`), dark mode via `Application.SetColorMode` |
-| Parsing de arquivos do jogo | `CodeWalker.Core` (netstandard2.0) de `external/CodeWalker` |
-| Renderização 3D | **Port nativo net10 por link de arquivos**: `GtaAtlas.Render` faz `<Compile Include>` dos fontes do upstream (sem copiar/editar) + `Stubs.cs`. Testado 2026-11-02: compila com 0 erros. Nosso Form implementa `CodeWalker.Rendering.DXForm`, `TopLevel=false`, hospedado como controle filho. Shaders `.cso` de `external/CodeWalker/Shaders` copiados pro output |
-| Licença | CodeWalker sem LICENSE explícito (só `Notice.txt`). grzyClothTool é GPL-3.0 → **só referência, não copiar código** (senão o app vira GPL) |
-| Cache | SQLite (`Microsoft.Data.Sqlite`) + FTS5 para busca; thumbnails PNG em disco, gerados sob demanda |
-| Jogo alvo inicial | Legacy: `C:\SteamLibrary\steamapps\common\Grand Theft Auto V`. Enhanced (gen9) depois |
-| Dados do usuário | `%LOCALAPPDATA%\GtaAtlas\` → `atlas.db`, `thumbs\`, `settings.json`, `logs\` |
+| Game file parsing | `CodeWalker.Core` (netstandard2.0) from `external/CodeWalker` |
+| 3D rendering | **Native net10 port by linking files**: `GtaAtlas.Render` does `<Compile Include>` of the upstream sources (no copying/editing) + `Stubs.cs`. Tested 2026-11-02: builds with 0 errors. Our Form implements `CodeWalker.Rendering.DXForm`, `TopLevel=false`, hosted as a child control. `.cso` shaders from `external/CodeWalker/Shaders` copied to the output |
+| License | CodeWalker has no explicit LICENSE (only `Notice.txt`). grzyClothTool is GPL-3.0 → **reference only, never copy code** (otherwise the app becomes GPL) |
+| Cache | SQLite (`Microsoft.Data.Sqlite`) + FTS5 for search; PNG thumbnails on disk, generated on demand |
+| Initial target game | Legacy: `C:\SteamLibrary\steamapps\common\Grand Theft Auto V`. Enhanced (gen9) later |
+| User data | `%LOCALAPPDATA%\GtaAtlas\` → `atlas.db`, `thumbs\`, `settings.json`, `logs\` |
 
-## Arquitetura
+## Architecture
 
 ```
-GtaAtlas.sln
-├─ external/CodeWalker                   (upstream, não editar; ideal virar git submodule)
-│    └─ CodeWalker.Core.csproj           ProjectReference direto (netstandard2.0)
-├─ src/GtaAtlas.Core       AppPaths, AtlasSettings, detecção do jogo (GameLocator), chaves (GameKeys), GameSession
-├─ src/GtaAtlas.Data       schema SQLite, migrations, repositórios, queries FTS
-├─ src/GtaAtlas.Indexer    varre RPFs via GameFileCache/RpfManager → grava no DB (incremental)
-├─ src/GtaAtlas.Render     fontes linkados do CodeWalker (abaixo) + Stubs.cs + ViewportForm : Form, DXForm + cenas + captura de thumbnails
-├─ src/GtaAtlas.App        UI WinForms (shell, listas, detalhes, viewport); `Browsing/` = lógica testável sem UI
-└─ tests/GtaAtlas.Tests    testes de hash, parsing, queries
+GtaAtlas.slnx
+├─ external/CodeWalker                   (upstream git submodule, do not edit)
+│    └─ CodeWalker.Core.csproj           direct ProjectReference (netstandard2.0)
+├─ src/GtaAtlas.Core       AppPaths, AtlasSettings, game detection (GameLocator), keys (GameKeys), GameSession
+├─ src/GtaAtlas.Data       SQLite schema, migrations, repositories, FTS queries
+├─ src/GtaAtlas.Indexer    scans RPFs via RpfManager → writes the DB
+├─ src/GtaAtlas.Render     linked CodeWalker sources (below) + Stubs.cs + ModelViewport : Form, DXForm + thumbnail capture
+├─ src/GtaAtlas.App        WinForms UI (shell, lists, details, viewport); `Browsing/` = logic testable without UI
+├─ src/GtaAtlas.Cli        `atlas` dev/debug CLI
+└─ tests/GtaAtlas.Tests    hash, parsing, query, indexer tests
 ```
 
-### Fontes do CodeWalker linkados em `GtaAtlas.Render` (prova de conceito validada)
+### CodeWalker sources linked into `GtaAtlas.Render` (proof of concept validated)
 
 ```xml
-<Compile Include="..\..\external\CodeWalker\CodeWalker\Rendering\**\*.cs" />           <!-- 34 arquivos -->
+<Compile Include="..\..\external\CodeWalker\CodeWalker\Rendering\**\*.cs" />           <!-- 34 files -->
 <Compile Include="..\..\external\CodeWalker\CodeWalker\Utils\MapUtils.cs" />
 <Compile Include="..\..\external\CodeWalker\CodeWalker\Utils\TextureLoader.cs" />
 <Compile Include="..\..\external\CodeWalker\CodeWalker\World\Widget.cs" />
 <Compile Include="..\..\external\CodeWalker\CodeWalker\GameFiles\TextureFormats.cs" />
 <Compile Include="..\..\external\CodeWalker\CodeWalker\Properties\Settings.Designer.cs" />
 ```
-Pacotes: SharpDX, SharpDX.D3DCompiler, SharpDX.Direct3D11, SharpDX.Direct2D1, SharpDX.Mathematics (4.2.0). `AllowUnsafeBlocks`, `Nullable=disable` nesse projeto.
-`Stubs.cs`: enum `CodeWalker.MapSelectionMode` (copiado de `World/MapSelection.cs`, que puxa `WorldForm`) e `GameFileCacheFactory.Create()` lançando exceção (sempre passamos o cache).
+Packages: SharpDX, SharpDX.D3DCompiler, SharpDX.Direct3D11, SharpDX.Direct2D1, SharpDX.Mathematics (4.2.0). `AllowUnsafeBlocks`, `Nullable=disable` in that project.
+`Stubs.cs`: enum `CodeWalker.MapSelectionMode` (copied from `World/MapSelection.cs`, which pulls in `WorldForm`) and `GameFileCacheFactory.Create()` throwing (we always pass the cache).
 
-Princípio: **a UI nunca varre o jogo**. Lista/busca/filtro = só SQLite. O jogo é aberto apenas para
-(a) indexar, (b) carregar o asset selecionado no viewport, (c) gerar thumbnail ausente.
+Principle: **the UI never scans the game**. Lists/search/filters = SQLite only. The game is opened only to
+(a) index, (b) load the selected asset in the viewport, (c) render a missing thumbnail.
 
-### Schema (rascunho)
+### Schema (draft)
 
-- `dlc(id, name, pack_name, title, order_index, build, released_at)` — ordem vinda de `dlclist.xml` + `setup2.xml`/`content.xml`
+- `dlc(id, name, pack_name, title, order_index, build, released_at)` — order from `dlclist.xml` + `setup2.xml`/`content.xml`
 - `asset(id, kind, name, hash, display_name, dlc_id, rpf_path, entry_path, extra_json)`
   - `kind`: prop, vehicle, ped, clothing, anim_dict, anim_clip, mlo, ipl, ymap
-- `asset_tag(asset_id, tag)` — tags derivadas (classe do veículo, fabricante, tipo do prop, componente da roupa, etc.)
-- `asset_fts` — FTS5 sobre name/display_name/tags/hash em texto (decimal, int32, hex)
-- `vehicle(asset_id, make, class, type, modkit, seats, ...)`, `ped(...)`, `clothing(...)`, `mlo(...)` — colunas específicas
-- `rpf_file(path, size, mtime, indexed_at)` — para reindex incremental
-- `meta(key, value)` — versão do schema, versão do jogo indexada
+- `asset_tag(asset_id, tag)` — derived tags (vehicle class, make, prop type, clothing component, etc.)
+- `asset_fts` — FTS5 over name/display_name/tags/hash as text (decimal, int32, hex)
+- `vehicle(asset_id, make, class, type, modkit, seats, ...)`, `ped(...)`, `clothing(...)`, `mlo(...)` — kind-specific columns
+- `rpf_file(path, size, mtime, indexed_at)` — for incremental reindex
+- `meta(key, value)` — schema version, indexed game version
 
-## Fases
+## Phases
 
-Cada fase termina em algo utilizável e verificável. Marque `[x]` ao concluir e anote desvios em "Notas de sessão".
+Each phase ends in something usable and verifiable. Mark `[x]` when done and note deviations under "Session notes".
 
-### Fase 0 — Fundação
-- [x] Solução `GtaAtlas.slnx` + projetos, `Directory.Build.props` (nullable, LangVersion latest, x64); `external/Directory.Build.props` vazio isola o upstream
-- [x] `CodeWalker.Core` via ProjectReference; `GtaAtlas.Render` com fontes linkados + stubs (ver seção acima)
-- [x] `settings.json` (path do jogo, gen9, AES key em cache) + detecção automática (registro Rockstar, bibliotecas Steam via `libraryfolders.vdf`, manifests Epic)
-- [x] Carregar chaves (`GTA5Keys.LoadFromPath`) e abrir/extrair de `x64a.rpf` → teste de integração
-- [x] `git init` + `.gitignore`; CodeWalker como submodule
-- [x] Testes xUnit v3 (MTP via `global.json`); testes de jogo pulam se não houver install (`GTA_ATLAS_GAME_DIR` força path)
+### Phase 0 — Foundation
+- [x] `GtaAtlas.slnx` solution + projects, `Directory.Build.props` (nullable, LangVersion latest, x64); empty `external/Directory.Build.props` isolates upstream
+- [x] `CodeWalker.Core` via ProjectReference; `GtaAtlas.Render` with linked sources + stubs (see above)
+- [x] `settings.json` (game path, gen9, cached AES key) + automatic detection (Rockstar registry, Steam libraries via `libraryfolders.vdf`, Epic manifests)
+- [x] Load keys (`GTA5Keys.LoadFromPath`) and open/extract from `x64a.rpf` → integration test
+- [x] `git init` + `.gitignore`; CodeWalker as submodule
+- [x] xUnit v3 tests (MTP via `global.json`); game tests skip without an install (`GTA_ATLAS_GAME_DIR` forces the path)
 
-**Pronto quando:** console/test lista entradas de `x64a.rpf`.
+**Done when:** console/test lists entries of `x64a.rpf`.
 
-### Fase 1 — Indexer + DB
-- [x] Schema + migrations em `GtaAtlas.Data` (`PRAGMA user_version`; `asset` genérico + `data` JSON por kind, `asset_source` com todas as ocorrências, FTS5 trigram)
-- [x] Mapear DLCs: `dlclist.xml` + `setup2.xml` (order, deviceName, timeStamp). Packs fora da lista entram no fim
-- [x] Props: archetypes de todos os `.ytyp` (nome, hash, bbox, lodDist, flags, assetType, dicts)
-- [x] Veículos: `vehicles.meta` + nomes GXT2 (display name, fabricante, classe, tipo, modkits). `carcols`/`carvariations` → Fase 5
-- [x] Peds: `peds.meta`/`peds.ymt` (nome, pedType, clipsets)
-- [x] Roupas (freemode M/F): 1 asset por drawable (`C/6/137/M`, `P/7/8/M`), texturas no JSON com nome GXT (`textLabel` do shop meta) + nome de dev (comentário XML). Índice global validado: 679/679 collections batem com dump de runtime (DurtyFree/gta-v-data-dumps) e total 5995 = plebmasters. Regras: ordem = setup2 `order`; collection que só existe em RPF overlay não existe; reenvio em patch mantém posição e usa conteúdo mais novo; Legacy ignora collections `*_g9ec`
-- [x] Animações: `.ycd` → dicionários e clips (nome, duração), incluindo cutscenes (tag `cutscene`). Leitor próprio `YcdClipReader` (só nomes/durações), validado contra `YcdFile` em teste
-- [x] MLOs: archetypes `CMloArchetypeDef` (rooms, portals, entity sets)
-- [x] YMAPs / IPLs: todo `.ymap` (extents, parent, flags, contagens). IPL = tag `ipl` quando `flags & 1` (script-managed) e não LOD (`contentFlags & 2`)
-- [x] Hashes: unsigned no DB; busca aceita decimal, int32 e hex (`HashText`)
-- [x] Reindex: fingerprint (SHA256 de path/size/mtime de todos os RPFs + `GameIndexer.Version`) → pula se igual. Rebuild sempre total (~30s), mais simples e correto que incremental por arquivo
-- [x] Tags automáticas (fabricante, classe, tipo de veículo, pedType, ytyp, assetType)
-- [x] CLI `atlas` (`files`, `index`, `search`, `stats`) para dev/debug
+### Phase 1 — Indexer + DB
+- [x] Schema + migrations in `GtaAtlas.Data` (`PRAGMA user_version`; generic `asset` + per-kind `data` JSON, `asset_source` with every occurrence, FTS5 trigram)
+- [x] Map DLCs: `dlclist.xml` + `setup2.xml` (order, deviceName, timeStamp). Packs missing from the list go last
+- [x] Props: archetypes from every `.ytyp` (name, hash, bbox, lodDist, flags, assetType, dicts)
+- [x] Vehicles: `vehicles.meta` + GXT2 names (display name, make, class, type, modkits). `carcols`/`carvariations` → Phase 5
+- [x] Peds: `peds.meta`/`peds.ymt` (name, pedType, clipsets)
+- [x] Clothing (freemode M/F): one asset per drawable (`C/6/137/M`, `P/7/8/M`), textures in the JSON with GXT name (`textLabel` from the shop meta) + dev name (XML comment). Global index validated: 679/679 collections match a runtime dump (DurtyFree/gta-v-data-dumps) and total 5995 = plebmasters. Rules: order = setup2 `order`; a collection that only exists in an overlay RPF does not exist; a re-ship in a patch keeps its position and uses the newer content; Legacy ignores `*_g9ec` collections
+- [x] Animations: `.ycd` → dictionaries and clips (name, duration), including cutscenes (tag `cutscene`). Own reader `YcdClipReader` (names/durations only), validated against `YcdFile` in a test
+- [x] MLOs: `CMloArchetypeDef` archetypes (rooms, portals, entity sets)
+- [x] YMAPs / IPLs: every `.ymap` (extents, parent, flags, counts). IPL = tag `ipl` when `flags & 1` (script-managed) and not LOD (`contentFlags & 2`)
+- [x] Hashes: unsigned in the DB; search accepts decimal, int32 and hex (`HashText`)
+- [x] Reindex: fingerprint (SHA256 of path/size/mtime of every RPF + `GameIndexer.Version`) → skip if equal. Always a full rebuild (~30 s), simpler and more correct than per-file incremental
+- [x] Automatic tags (vehicle make, class, type; ped type; prop behaviour and size — revised 2026-11-03, see notes)
+- [x] `atlas` CLI (`files`, `index`, `search`, `stats`) for dev/debug
 
-**Pronto quando:** `atlas.db` gerado; contagens por kind/DLC batem aproximadamente com o plebmasters.
+**Done when:** `atlas.db` generated; counts per kind/DLC roughly match plebmasters.
 
-### Fase 2 — Shell da UI + navegação
-- [x] Janela principal dark, controles owner-draw próprios (`Ui/Controls`: `NavSidebar`, `SearchBox`, `Dropdown` com filtro, `Segmented`, `ChipBar`, `PillButton`, `Toast`); fontes Segoe UI Variable + ícones Segoe Fluent Icons; barra de título escura via DWM
-- [x] Sidebar por seções (Browse / World / Library) com contagens. Cabeçalho: título + nº de resultados + ms, alternância Todos | ★ Favoritos (por categoria), grid | lista
-- [x] Busca (debounce 150 ms, async, resultado velho descartado), filtros DLC (mais recente primeiro, com filtro de texto) e gênero (só Clothes), chips das tags mais comuns
-- [x] Grid de cards **virtualizado** (`AssetGridView`, páginas de 200 sob demanda com LRU em `ResultPager`): área de imagem (placeholder por kind até a Fase 4), nome, subtítulo, DLC, copiar no hover
-- [x] Alternar grid ↔ lista compacta (Ctrl+L)
-- [x] Detalhe em janela modal (`DetailForm`, duplo-clique/Enter): preview à esquerda (lugar do viewport 3D), à direita hashes, identidade, tags, propriedades (`AssetText.DataFields`) e fontes; clique em linha copia; ←/→ navega no resultado; Esc fecha
-- [x] Atalhos: Ctrl+F, Enter/↓ na busca vai pro grid, Enter abre detalhe, Esc volta/limpa, Ctrl+C copia nome (clip = `dict clip`), Ctrl+D favorito, Ctrl+L grid/lista, setas/PgUp/PgDn/Home/End
-- [x] Página DLCs: tabela própria (`DlcTableView`), ordenável por coluna (`DlcTable`), padrão mais recente primeiro; duplo-clique abre All filtrado pelo pack
-- [x] Favoritos persistidos no DB, filtrados dentro de cada categoria (sem aba própria)
-- [x] Tela de primeira execução / Reindex: escolher/detectar pasta → indexar com barra de progresso (`IndexForm`); erros em `logs\index.log`
-- [x] Ícone do app (`Resources/atlas.ico` 16–256 px, gerado por `make-icon.py`): globo teal + marcador, sem marca Rockstar
-- [x] Ordenação natural: números por valor (`C/0/2/F` antes de `C/0/10/F`) via coluna `sort_name` (`NaturalSort.Key`, dígitos com zero à esquerda) nos índices de browse
+### Phase 2 — UI shell + navigation
+- [x] Dark main window, own owner-drawn controls (`Ui/Controls`: `NavSidebar`, `SearchBox`, `Dropdown` with filter, `Segmented`, `ChipBar`, `PillButton`, `Toast`); Segoe UI Variable fonts + Segoe Fluent Icons; dark title bar via DWM
+- [x] Sidebar by section (Browse / World / Library) with counts. Header: title + result count + ms, All | ★ Favorites toggle (per category), grid | list
+- [x] Search (150 ms debounce, async, stale results discarded), DLC filter (newest first, with text filter) and gender (Clothes only), chips of the most common tags
+- [x] **Virtualized** card grid (`AssetGridView`, pages of 200 on demand with LRU in `ResultPager`): image area (per-kind placeholder until Phase 4), name, subtitle, DLC, copy on hover
+- [x] Toggle grid ↔ compact list (Ctrl+L)
+- [x] Detail in a modal window (`DetailForm`, double-click/Enter): preview on the left (where the 3D viewport goes), on the right hashes, identity, tags, properties (`AssetText.DataFields`) and sources; clicking a row copies it; ←/→ navigates the results; Esc closes
+- [x] Shortcuts: Ctrl+F, Enter/↓ in search goes to the grid, Enter opens detail, Esc goes back/clears, Ctrl+C copies the name (clip = `dict clip`), Ctrl+D favorite, Ctrl+L grid/list, arrows/PgUp/PgDn/Home/End
+- [x] DLCs page: own table (`DlcTableView`), sortable by column (`DlcTable`), newest first by default; double-click opens All filtered by the pack
+- [x] Favorites persisted in the DB, filtered within each category (no separate tab)
+- [x] First-run / Reindex screen: pick/detect folder → index with a progress bar (`IndexForm`); errors in `logs\index.log`
+- [x] App icon (`Resources/atlas.ico` 16–256 px, generated by `make-icon.py`): teal globe + pin, no Rockstar branding
+- [x] Natural sort: numbers by value (`C/0/2/F` before `C/0/10/F`) via a `sort_name` column (`NaturalSort.Key`, zero-padded digits) in the browse indexes
 
-**Pronto quando:** busca em ~50k props responde em < 50 ms, sem preview 3D ainda.
+**Done when:** search over ~50k props answers in < 50 ms, no 3D preview yet.
 
-### Fase 3 — Viewport 3D (núcleo do renderer)
-- [x] `ModelViewport : Form, DXForm` (`GtaAtlas.Render`) com `new Renderer(this, cache)`; `TopLevel=false`, hospedado no `PreviewPane` do `DetailForm`. Fica oculto até o 1º modelo carregar (Load → `Renderer.Start`); `Close()` explícito no Dispose libera o device (form filho não fecha com o pai)
-- [x] Shaders `.cso` copiados para `Shaders\` no output (transitivo via `GtaAtlas.Render`)
-- [x] Orbit (arrastar), pan (botão direito/meio), zoom (roda), reset (duplo-clique / R); fundo = `Theme.Surface` (`Background`, via reflection em `DXManager.clearcolour`; HDR off porque o PostProcessor limpa com azul fixo)
-- [x] `GameAssets`: um `GameFileCache` por execução, iniciado em background no `MainForm.OnShown` + thread que bombeia `ContentThreadProc`. Init 11 s → ~5 s: `LoadVehicles/Peds/Audio=false` e `CacheInit` pula dicionários de ymap e map caches (reflection na sequência privada do `InitDlc`, fallback pro `Init` normal; `CacheInitTests` compara com o fonte)
-- [x] Props (`RenderArchetype`) e veículos (`GameAssets.LoadVehicle` → `name_hi.yft`/`name.yft` + `RenderFragment`, sem `vehicles.meta`) no detalhe; ←/→ troca na hora com cache pronto. Setas de navegação no rodapé (nada pinta sobre a janela DX)
-- [x] Veículos texturizados confirmados no app
-- [x] Barra acima do viewport: seletor de LOD (só níveis que o modelo tem; L alterna) + toggles Wireframe (W), Bounds (B), Skeleton (S). LOD via `SelectionModelDrawFlags` aplicado a cada drawable renderizado (`RenderedDrawables`), regras em `ModelLods`. Veículo: High = `_hi.yft`, Medium/Low/VeryLow = níveis do `.yft` normal
-- [x] Liberação de recursos GPU ao trocar asset: o `RenderableCache` do upstream descarrega o que ficou 1 s sem uso; medido navegando 60 veículos: GPU 10–50 MB, working set estável ~1,1 GB
-- [x] Progresso do carregamento do cache na sidebar (título + %, barra, etapa; some ao terminar; falha vira toast). `InitProgress`: pesos por etapa medidos (scan 2,2 s, índice global 0,8, manifests 0,4, gtxd 0,7, archetypes 1,1, strings 0,3); dentro do scan avança por bytes dos RPFs top-level já alcançados. Fallback `Cache.Init` = barra indeterminada
-- [ ] Opcional: scan de RPFs em paralelo (~2 s seriais; exige reflection pesada no `RpfManager`)
+### Phase 3 — 3D viewport (renderer core)
+- [x] `ModelViewport : Form, DXForm` (`GtaAtlas.Render`) with `new Renderer(this, cache)`; `TopLevel=false`, hosted in the `DetailForm`'s `PreviewPane`. Hidden until the first model loads (Load → `Renderer.Start`); explicit `Close()` in Dispose releases the device (a child form does not close with its parent)
+- [x] `.cso` shaders copied to `Shaders\` in the output (transitive via `GtaAtlas.Render`)
+- [x] Orbit (drag), pan (right/middle button), zoom (wheel), reset (double-click / R); background = `Theme.Surface` (`Background`, via reflection on `DXManager.clearcolour`; HDR off because the PostProcessor clears with a fixed blue)
+- [x] `GameAssets`: one `GameFileCache` per run, started in the background in `MainForm.OnShown` + a thread pumping `ContentThreadProc`. Init 11 s → ~5 s: `LoadVehicles/Peds/Audio=false` and `CacheInit` skips ymap dictionaries and map caches (reflection over the private `InitDlc` sequence, falls back to the normal `Init`; `CacheInitTests` compares against the source)
+- [x] Props (`RenderArchetype`) and vehicles (`GameAssets.LoadVehicle` → `name_hi.yft`/`name.yft` + `RenderFragment`, without `vehicles.meta`) in the detail; ←/→ switches instantly once the cache is ready. Navigation arrows in the footer (nothing paints over the DX window)
+- [x] Textured vehicles confirmed in the app
+- [x] Bar above the viewport: LOD picker (only levels the model has; L cycles) + Wireframe (W), Bounds (B), Skeleton (S) toggles. LOD via `SelectionModelDrawFlags` applied to each rendered drawable (`RenderedDrawables`), rules in `ModelLods`. Vehicle: High = `_hi.yft`, Medium/Low/VeryLow = levels of the normal `.yft`
+- [x] GPU resources released when switching assets: upstream's `RenderableCache` unloads what went unused for 1 s; measured browsing 60 vehicles: GPU 10–50 MB, working set steady at ~1.1 GB
+- [x] Cache loading progress in the sidebar (title + %, bar, stage; disappears when done; failure becomes a toast). `InitProgress`: measured per-stage weights (scan 2.2 s, global index 0.8, manifests 0.4, gtxd 0.7, archetypes 1.1, strings 0.3); within the scan it advances by bytes of the top-level RPFs reached so far. `Cache.Init` fallback = indeterminate bar
+- [ ] Optional: parallel RPF scan (~2 s serial; needs heavy reflection into `RpfManager`)
 
-**Pronto quando:** abrir qualquer prop/veículo mostra modelo texturizado e orbitável.
+**Done when:** opening any prop/vehicle shows a textured, orbitable model.
 
-### Fase 4 — Thumbnails
-- [x] Captura offscreen: `ThumbnailRenderer` (384×256) = janela oculta com device próprio numa thread STA dedicada (com message loop; a janela precisa ser bombeada/destruída pela thread que a criou). Espera geometria + texturas na GPU (4 frames estáveis, timeout 8 s), resolve MSAA → staging → bytes. Fundo transparente por *difference matting*: renderiza sobre preto e sobre branco, alpha = 1 − (branco − preto) (`ThumbnailMatte`), preserva bordas e vidro
-- [x] Fila em background priorizando cards visíveis (`ThumbnailQueue`: pilha, último card pintado primeiro, cap 400; gerar-todos é FIFO de menor prioridade); cache PNG em `thumbs\{kind}\{hash:x8}.png` (`ThumbnailStore`), `.fail` com o motivo para modelos inexistentes/vazios. Pausa enquanto o detalhe 3D está aberto
-- [x] Placeholder por kind enquanto não existe; botão "Generate thumbnails" (props/veículos do resultado atual, progresso na sidebar, Stop)
-- [x] Enquadramento automático pelo bounding box (`Framing.Fit`: distância para caber os 8 cantos + recentragem da projeção); props vistos de −Y, veículos de +Y (frente ¾); luz vem do lado da câmera
-- [x] Limite de disco: `settings.json` → `ThumbnailCacheMb` (padrão 500). LRU pela data de escrita (tocada a cada leitura); ao abrir e a cada 200 salvos apaga os mais antigos até 90%
+### Phase 4 — Thumbnails
+- [x] Offscreen capture: `ThumbnailRenderer` (384×256) = hidden window with its own device on a dedicated STA thread (with a message loop; the window must be pumped/destroyed by the thread that created it). Waits for geometry + textures on the GPU (4 stable frames, 8 s timeout), resolves MSAA → staging → bytes. Transparent background by *difference matting*: renders over black and over white, alpha = 1 − (white − black) (`ThumbnailMatte`), keeps edges and glass
+- [x] Background queue prioritizing visible cards (`ThumbnailQueue`: stack, last painted card first, cap 400; generate-all is a lower-priority FIFO); PNG cache in `thumbs\{kind}\{hash:x8}.png` (`ThumbnailStore`), `.fail` with the reason for missing/empty models. Pauses while the 3D detail is open
+- [x] Per-kind placeholder until it exists; "Generate thumbnails" button (props/vehicles of the current result, progress in the sidebar, Stop)
+- [x] Automatic framing from the bounding box (`Framing.Fit`: distance to fit the 8 corners + projection recentering); props seen from −Y, vehicles from +Y (¾ front); light comes from the camera side
+- [x] Disk limit: `settings.json` → `ThumbnailCacheMb` (default 500). LRU by write time (touched on every read); on start and every 200 saves deletes the oldest down to 90%
 
-### Fase 5 — Veículos e Peds completos
+### Phase 5 — Full vehicles and peds
 
-Referência de padrão: `..\grzyClothTool\CodeWalker\CodeWalker\CustomPedsForm.cs` (montagem de ped, drawables/texturas por componente, anims). GPL → ler e reimplementar, não copiar.
+Reference pattern: `..\grzyClothTool\CodeWalker\CodeWalker\CustomPedsForm.cs` (ped assembly, drawables/textures per component, anims). GPL → read and reimplement, do not copy.
 
-- [ ] Veículos: pintura (paleta carcols), extras, liveries, rodas
-- [ ] Vehicle mods (modkit): listar e aplicar peças no viewport
-- [ ] Peds: montar componentes (`.ydd` por slot), variações de drawable/textura
-- [ ] Roupas: preview sobre ped freemode (mp_m/mp_f) com o componente aplicado; mostrar `C/{comp}/{drawable}/{tex}` / `P/...`
+- [ ] Vehicles: paint (carcols palette), extras, liveries, wheels
+- [ ] Vehicle mods (modkit): list and apply parts in the viewport
+- [ ] Peds: assemble components (`.ydd` per slot), drawable/texture variations
+- [ ] Clothing: preview on a freemode ped (mp_m/mp_f) with the component applied; show `C/{comp}/{drawable}/{tex}` / `P/...`
 
-### Fase 6 — Animações
-- [ ] Player de clip `.ycd` em ped (skeleton freemode por padrão; escolher ped)
-- [ ] Timeline: play/pause, scrub, velocidade, loop
-- [ ] Busca por dicionário e clip; copiar `dict` + `clip`
+### Phase 6 — Animations
+- [ ] `.ycd` clip player on a ped (freemode skeleton by default; pick a ped)
+- [ ] Timeline: play/pause, scrub, speed, loop
+- [ ] Search by dictionary and clip; copy `dict` + `clip`
 
-### Fase 7 — Mapa: MLOs, IPLs, YMAPs
-- [ ] Preview de MLO (rooms + entidades, entity sets on/off)
-- [ ] YMAP/IPL: renderizar entidades do ymap isoladamente; mostrar coordenadas
-- [ ] Mapa 2D com localização (opcional: tile do mapa do jogo)
-- [ ] "Locations": onde um prop aparece no mundo (índice reverso archetype → ymap/posição, gerado no indexer)
+### Phase 7 — Map: MLOs, IPLs, YMAPs
+- [ ] MLO preview (rooms + entities, entity sets on/off)
+- [ ] YMAP/IPL: render the ymap's entities in isolation; show coordinates
+- [ ] 2D map with location (optional: game map tile)
+- [ ] "Locations": where a prop appears in the world (reverse index archetype → ymap/position, built by the indexer)
 
-### Fase 8 — DLCs e diffs
-- [ ] Página por DLC: título, pack name, contagens por tipo (igual ao TOC do plebmasters)
-- [ ] Listas "novos em X" filtradas por `dlc_id`
-- [ ] Diff entre DLCs: assets adicionados/sobrescritos (mesmo nome em pack posterior = modificado)
-- [ ] Diff entre versões do jogo: snapshot do DB por build (`version.txt`) e comparação entre snapshots
+### Phase 8 — DLCs and diffs
+- [ ] Per-DLC page: title, pack name, counts per kind (like the plebmasters TOC)
+- [ ] "New in X" lists filtered by `dlc_id`
+- [ ] Diff between DLCs: added/overridden assets (same name in a later pack = modified)
+- [ ] Diff between game versions: DB snapshot per build (`version.txt`) and comparison between snapshots
 
-### Fase 9 — Extras / polimento
-- [ ] Exportar código de scripting (Lua/JS/C#) — ex. `CreateObject(\`hash\`, ...)`
-- [ ] Exportar listas CSV/JSON
-- [ ] Suporte Enhanced (gen9): path separado, DB separado
-- [ ] Suporte a pasta `mods`/resources FiveM customizados (indexar pasta solta)
-- [ ] Instalador / publish single-file
+### Phase 9 — Extras / polish
+- [ ] Export scripting code (Lua/JS/C#) — e.g. `CreateObject(\`hash\`, ...)`
+- [ ] Export lists as CSV/JSON
+- [ ] Enhanced (gen9) support: separate path, separate DB
+- [ ] Support a `mods` folder / custom FiveM resources (index a loose folder)
+- [ ] Installer / single-file publish
+- [x] Release pipeline: tag-triggered GitHub Actions workflow + `scripts/bump-version.ps1`
 
-## Riscos conhecidos
+## Known risks
 
-- **Reflection em privados do CodeWalker** (`CacheInit`, `DXManager.clearcolour`): quebra se o upstream renomear; `CacheInitTests` avisa e o código cai no caminho normal.
-- **DXManager assume Form top-level**: `ClientSizeChanged` chega antes do `InitScene` (guardado em `BuffersResized`); render loop dorme 100 ms quando o app não é a janela ativa.
-- **Memória**: `GameFileCache` do app ~400 MB gerenciados após init (archetypes de todas as DLCs), cache de arquivos LRU de 2 GB. Indexer não usa o cache.
-- **SharpDX está descontinuado** mas funciona em .NET 10. Migrar para Vortice.Windows só se der problema.
-- **Nomes legíveis** dependem de GXT2 / dados externos; nem todo prop tem display name.
-- **Clothes**: nomes "bonitos" (ex. "Blue Bangles") vêm de shop meta + GXT; parte pode faltar.
+- **Reflection into CodeWalker privates** (`CacheInit`, `DXManager.clearcolour`): breaks if upstream renames them; `CacheInitTests` warns and the code falls back to the normal path.
+- **DXManager assumes a top-level Form**: `ClientSizeChanged` arrives before `InitScene` (guarded in `BuffersResized`); the render loop sleeps 100 ms when the app is not the active window.
+- **Memory**: the app's `GameFileCache` is ~400 MB managed after init (archetypes of every DLC), 2 GB LRU file cache. The indexer does not use the cache.
+- **SharpDX is discontinued** but works on .NET 10. Migrate to Vortice.Windows only if it causes problems.
+- **Readable names** depend on GXT2 / external data; not every prop has a display name.
+- **Clothes**: "pretty" names (e.g. "Blue Bangles") come from the shop meta + GXT; some may be missing.
 
-## Como retomar em uma nova sessão
+## Resuming in a new session
 
-1. Ler este arquivo e `CLAUDE.md`.
-2. Achar a primeira fase com itens `[ ]` e continuar dela.
-3. Ao terminar um bloco: marcar `[x]`, adicionar linha em "Notas de sessão".
+1. Read this file and `CLAUDE.md`.
+2. Find the first phase with `[ ]` items and continue from there.
+3. When a block is done: mark `[x]`, add a line under "Session notes".
 
-## Notas de sessão
+## Session notes
 
-- 2026-11-02 — Projeto criado. CodeWalker clonado em `external/CodeWalker` (shallow). Decididos .NET 10 + WinForms + Legacy primeiro.
-- 2026-11-02 — Visto `..\grzyClothTool`: usa CodeWalker net48 como DLL em app net10 + `CustomPedsForm : Form, DXForm` hospedado. Trocado plano de "portar renderer" para "referenciar DLL + DXForm próprio".
-- 2026-11-02 — Teste de port: `Rendering/**` + 5 arquivos + 2 stubs compilam em net10 com 0 erros, sem editar upstream. Decidido port nativo por link de arquivos (sem DLL net48).
-- 2026-11-02 — Fase 0 concluída. 14 testes verdes (inclui integração com jogo real). Achado: `x64a.rpf` não tem RPFs aninhados. Leitura de chaves a partir do exe leva ~2s; cache em `settings.json`.
-- 2026-11-02 — Fase 1 fatia 1: props/MLOs/veículos/peds. Scan de todos os RPFs 4s, index total 29s, 161k assets. mp2026_01 bate com plebmasters (objects 1266, peds 9, MLOs 5; veículos 14 vs 13 — o extra é o trailer `trflat2`). Busca 25–50 ms. Indexer não usa `GameFileCache` (mescla e perde origem). DLCs `*_g9ec` são packs do Enhanced também presentes no Legacy.
-- 2026-11-02 — Fase 1 fatia 2: anims + ymaps. mp2026_01 bate 100% com plebmasters exceto trailer (anims 3216 incluindo cutscenes, YMAPs 19, IPLs 9). Performance: `YcdFile` completo era 90% do tempo → leitor enxuto (1564s→71s CPU). DB reconstruído em arquivo novo sem journal/índices e trocado no fim: escrita 90s→7s, 497→253 MB. Index total 32s (466k assets). Schema ainda não lançado → editar v1 direto e apagar DB local, sem migrations novas.
-- 2026-11-02 — Fase 1 concluída (roupas). Achados: (1) `dlclist.xml` mistura `<Item>`/`<item>` — parser pegava só metade; (2) ordem de carga real = setup2 `order` (confirmado pela numeração de roupas), mas patchdays com order baixo reenviam conteúdo de DLCs posteriores via RPFs `overlay=true` → regra geral: DLC que introduz um asset = primeira fonte fora de overlay (`DlcOverlays` lê content.xml); (3) packs `*_g9ec` são do Enhanced: no Legacy não entram na numeração de roupas e demais assets ganham tag `enhanced`. Referência de validação: `DurtyFree/gta-v-data-dumps` (`pedComponentVariations_free.json`, mesmo autor do plebmasters) — útil também para validar outras fases.
-- 2026-11-02 — Fase 2 concluída (falta só ordenação natural de roupas). Medido em 471k assets: browse por kind 100 ms → 5–9 ms (índices de expressão `(kind, name GLOB '0x*', name)` + count sem JOIN de dlc); nomes só-hash (`0x…`) vão pro fim; favoritos 632 → 16 ms (subquery partindo de `favorite`). Busca com palavra de 1–2 letras ainda ~250 ms (LIKE full scan) — UI é async, aceitável. `GetFolderPath` ignora `LOCALAPPDATA` → `GTA_ATLAS_HOME` sobrepõe a pasta de dados (testar primeira execução: `$env:GTA_ATLAS_HOME="..."`). `atlas search --repeat n` mede query quente.
-- 2026-11-02 — Redesign da UI (pedido do usuário, referência visual forge.plebmasters): tudo owner-draw com tema único em `Theme`; painel lateral de detalhe → modal; favoritos por categoria; DLCs ordenáveis. Glyphs de ícone precisam de `Theme.Icon*` (fonte de texto mostra "·"). `TextBox.PlaceholderText` em vez de pintar por baixo (o TextBox cobre).
-- 2026-11-02 — Smooth scroll (grid, lista, detalhe, DLCs, dropdown): `ScrollAnimator` (easing exponencial por tempo, alvo acumula giros da roda) dirigido por `FrameClock` (thread em `DwmFlush` = 1 frame por vsync; `Forms.Timer` tem ~15,6 ms de resolução e travava a 144 Hz) com pintura síncrona. Grid pintava em ~8,5 ms → cache de linhas em bitmap (32bppRgb, GDI text funciona) + tile placeholder por kind: ~2 ms/frame em 2576 px, sem frames > 7 ms medidos. Hover/seleção desenhados ao vivo por cima.
-- 2026-11-02 — Fase 2 concluída: ordenação natural. Primeira migration real (v2: `sort_name` preenchido por função SQLite `natural_key`) em vez de editar v1, para não perder favoritos; ~7 s uma vez no DB de 471k assets, sem reindex. v1 agora só cria tabelas; índices vêm na v2.
-- 2026-11-03 — Fase 3, viewport: renderer do CodeWalker roda em .NET 10 sem ajustes (risco do roadmap resolvido). Profile do init do `GameFileCache` (11 s): veículos 3,2 s, RPF scan 2,1 s, archetypes 1,3 s, dicts globais 1,2 s, mapas 0,9 s, gtxd 0,8 s. Cortados veículos (yft direto) e mapas (reflection) → ~5 s, 630 → ~400 MB. Corrigido: contagem da sidebar para categorias por tag (IPLs). Validação visual com SendKeys + screenshot (script descartável); cliques simulados (`mouse_event`) não acionavam a sidebar (corrigido em 2026-11-03: faltava DPI awareness).
-- 2026-11-03 — Fase 3, ferramentas do viewport. Bug achado: `SelectionFlagsTestAll` sem flags desenhava todos os LODs sobrepostos (`AllModels`). `adder_hi.yft` só tem High; os LODs menores ficam em `adder.yft` → veículo carrega os dois. Props podem vir de `.yft` (ex. `prop_bench_01a`), não só ydr/ydd. Validação visual: script com SendKeys; clique na sidebar funciona com `SetProcessDPIAware` + coordenadas físicas. App da solução sai em `bin\x64\Debug` (o `bin\Debug` é de builds avulsos do projeto, pode estar velho).
-- 2026-11-03 — Barra de progresso do cache: avanço quase linear no tempo (3% em 0,6 s, 39% em 2,5 s, 76% em 5 s, pronto ~6 s). Status do upstream durante as etapas são caminhos de arquivo crus → UI usa rótulo por etapa (`InitProgress.Label`). Recalibrar pesos: forçar falha no `GameAssetsTests` para ver a linha `stages:` (saída de teste aprovado não aparece no MTP).
-- 2026-11-03 — Fase 4 concluída. Thumbnail: prop ~140 ms, veículo ~220 ms; gerar-todos ~9 veículos/s. PNG 384×256 com alpha: prop ~14 KB, veículo ~37 KB (todos os props ≈ 2,2 GB → por isso o limite LRU). Avaliado formato: JPEG perde a transparência, WebP precisaria de SkiaSharp (GDI+ não codifica) — fica PNG; trocar isola-se no `ThumbnailStore`. Achados: Close de janela criada em thread sem message loop trava (teste travou) → thread STA própria; corpo do veículo sai branco (pintura vem do carcols, Fase 5); helicópteros saem pequenos (bbox inclui rotor). Working set com detalhe aberto ~1,5 GB (2º device + cache de renderables).
-- 2026-11-03 — Polimento pós-Fase 4. Sidebar do detalhe desalinhava ao rolar: `TextRenderer` ignora `TranslateTransform` do `Graphics` (fundos rolavam, texto não) → offset manual por retângulo; não usar transform em controles que misturam GDI e GDI+. Tags geradas refeitas: props perdem ytyp/assetType (ficam em Properties) e ganham `scriptable`, `fragment`, `timed`, `animated`, `lod`, `size: small|medium|large|huge`; peds sem `Hash …`; MLOs sem ytyp. `scriptable` = ytyp em `PERMANENT_ITYP_FILE` (gta5.meta) ou `DLC_ITYP_REQUEST` (content.xml) → sempre residente, `CreateObject` funciona em qualquer lugar (15.750 props). `ObjectList.ini` do DurtyFree (21.631, base do "Scriptable" do plebmasters) é dump em runtime: bate em 15.163; o resto são interiores que estavam carregados no dump (só spawnam com o interior carregado), armas `w_*` (vêm de `weaponarchetypes.meta`, ainda não indexadas) e DLCs mais novos que a lista. gta5.meta usa `<xi:include>` sem declarar prefixo → parser XML falha sem tratar.
+- 2026-11-02 — Project created. CodeWalker cloned into `external/CodeWalker` (shallow). Decided on .NET 10 + WinForms + Legacy first.
+- 2026-11-02 — Looked at `..\grzyClothTool`: uses CodeWalker net48 as a DLL in a net10 app + a hosted `CustomPedsForm : Form, DXForm`. Switched the plan from "port the renderer" to "reference the DLL + own DXForm".
+- 2026-11-02 — Port test: `Rendering/**` + 5 files + 2 stubs build on net10 with 0 errors, without editing upstream. Decided on a native port by linking files (no net48 DLL).
+- 2026-11-02 — Phase 0 done. 14 tests green (includes integration with the real game). Finding: `x64a.rpf` has no nested RPFs. Reading the keys from the exe takes ~2 s; cached in `settings.json`.
+- 2026-11-02 — Phase 1 slice 1: props/MLOs/vehicles/peds. Scanning all RPFs 4 s, full index 29 s, 161k assets. mp2026_01 matches plebmasters (objects 1266, peds 9, MLOs 5; vehicles 14 vs 13 — the extra one is the `trflat2` trailer). Search 25–50 ms. The indexer does not use `GameFileCache` (it merges and loses the origin). `*_g9ec` DLCs are Enhanced packs also present in Legacy.
+- 2026-11-02 — Phase 1 slice 2: anims + ymaps. mp2026_01 matches plebmasters 100% except the trailer (anims 3216 including cutscenes, YMAPs 19, IPLs 9). Performance: the full `YcdFile` was 90% of the time → lean reader (1564 s → 71 s CPU). DB rebuilt in a new file without journal/indexes and swapped at the end: write 90 s → 7 s, 497 → 253 MB. Full index 32 s (466k assets). Schema not released yet → edit v1 directly and delete the local DB, no new migrations.
+- 2026-11-02 — Phase 1 done (clothing). Findings: (1) `dlclist.xml` mixes `<Item>`/`<item>` — the parser only got half; (2) the real load order = setup2 `order` (confirmed by clothing numbering), but patchdays with a low order re-ship content from later DLCs via `overlay=true` RPFs → general rule: the DLC that introduces an asset = first source outside an overlay (`DlcOverlays` reads content.xml); (3) `*_g9ec` packs are Enhanced: in Legacy they are not part of clothing numbering and other assets get the `enhanced` tag. Validation reference: `DurtyFree/gta-v-data-dumps` (`pedComponentVariations_free.json`, same author as plebmasters) — also useful to validate other phases.
+- 2026-11-02 — Phase 2 done (only natural sort of clothing missing). Measured on 471k assets: browse by kind 100 ms → 5–9 ms (expression indexes `(kind, name GLOB '0x*', name)` + count without the dlc JOIN); hash-only names (`0x…`) go last; favorites 632 → 16 ms (subquery starting from `favorite`). Search with a 1–2 letter word still ~250 ms (LIKE full scan) — the UI is async, acceptable. `GetFolderPath` ignores `LOCALAPPDATA` → `GTA_ATLAS_HOME` overrides the data folder (to test first run: `$env:GTA_ATLAS_HOME="..."`). `atlas search --repeat n` measures a warm query.
+- 2026-11-02 — UI redesign (user request, visual reference forge.plebmasters): everything owner-drawn with a single theme in `Theme`; side detail panel → modal; favorites per category; sortable DLCs. Icon glyphs need `Theme.Icon*` (the text font shows "·"). `TextBox.PlaceholderText` instead of painting underneath (the TextBox covers it).
+- 2026-11-02 — Smooth scroll (grid, list, detail, DLCs, dropdown): `ScrollAnimator` (time-based exponential easing, target accumulates wheel ticks) driven by `FrameClock` (thread on `DwmFlush` = 1 frame per vsync; `Forms.Timer` has ~15.6 ms resolution and stuttered at 144 Hz) with synchronous painting. The grid painted in ~8.5 ms → row cache in bitmaps (32bppRgb, GDI text works) + per-kind placeholder tile: ~2 ms/frame at 2576 px, no frames > 7 ms measured. Hover/selection drawn live on top.
+- 2026-11-02 — Phase 2 done: natural sort. First real migration (v2: `sort_name` filled by the SQLite function `natural_key`) instead of editing v1, so favorites are not lost; ~7 s once on the 471k-asset DB, no reindex. v1 now only creates tables; indexes come in v2.
+- 2026-11-03 — Phase 3, viewport: the CodeWalker renderer runs on .NET 10 without changes (roadmap risk resolved). `GameFileCache` init profile (11 s): vehicles 3.2 s, RPF scan 2.1 s, archetypes 1.3 s, global dicts 1.2 s, maps 0.9 s, gtxd 0.8 s. Cut vehicles (direct yft) and maps (reflection) → ~5 s, 630 → ~400 MB. Fixed: sidebar count for tag-based categories (IPLs). Visual validation with SendKeys + screenshot (throwaway script); simulated clicks (`mouse_event`) did not trigger the sidebar (fixed 2026-11-03: DPI awareness was missing).
+- 2026-11-03 — Phase 3, viewport tools. Bug found: `SelectionFlagsTestAll` without flags drew all LODs on top of each other (`AllModels`). `adder_hi.yft` only has High; the lower LODs live in `adder.yft` → a vehicle loads both. Props can come from `.yft` (e.g. `prop_bench_01a`), not only ydr/ydd. Visual validation: script with SendKeys; clicking the sidebar works with `SetProcessDPIAware` + physical coordinates. The solution's app builds to `bin\x64\Debug` (`bin\Debug` comes from standalone project builds and may be stale).
+- 2026-11-03 — Cache progress bar: progress is nearly linear in time (3% at 0.6 s, 39% at 2.5 s, 76% at 5 s, ready at ~6 s). Upstream status during the stages is raw file paths → the UI uses a label per stage (`InitProgress.Label`). To recalibrate weights: force a failure in `GameAssetsTests` to see the `stages:` line (output of passing tests does not show in MTP).
+- 2026-11-03 — Phase 4 done. Thumbnail: prop ~140 ms, vehicle ~220 ms; generate-all ~9 vehicles/s. 384×256 PNG with alpha: prop ~14 KB, vehicle ~37 KB (all props ≈ 2.2 GB → hence the LRU limit). Format evaluated: JPEG loses transparency, WebP would need SkiaSharp (GDI+ cannot encode it) — stays PNG; swapping is isolated in `ThumbnailStore`. Findings: closing a window created on a thread without a message loop hangs (a test hung) → own STA thread; vehicle bodies come out white (paint comes from carcols, Phase 5); helicopters come out small (bbox includes the rotor). Working set with the detail open ~1.5 GB (2nd device + renderables cache).
+- 2026-11-03 — Post-Phase 4 polish. The detail sidebar misaligned when scrolling: `TextRenderer` ignores the `Graphics` `TranslateTransform` (backgrounds scrolled, text did not) → manual offset per rectangle; don't use transforms in controls that mix GDI and GDI+. Generated tags redone: props lose ytyp/assetType (kept in Properties) and gain `scriptable`, `fragment`, `timed`, `animated`, `lod`, `size: small|medium|large|huge`; peds without `Hash …`; MLOs without ytyp. `scriptable` = ytyp in `PERMANENT_ITYP_FILE` (gta5.meta) or `DLC_ITYP_REQUEST` (content.xml) → always resident, `CreateObject` works anywhere (15,750 props). DurtyFree's `ObjectList.ini` (21,631, the basis of plebmasters' "Scriptable") is a runtime dump: it matches on 15,163; the rest are interiors that were loaded during the dump (they only spawn with the interior loaded), `w_*` weapons (from `weaponarchetypes.meta`, not indexed yet) and DLCs newer than the list. gta5.meta uses `<xi:include>` without declaring the prefix → the XML parser fails unless handled.
+- 2026-11-03 — Release setup: `.github/workflows/release.yml` (tag `vX.Y.Z` → check against `<Version>` in `Directory.Build.props`, build, test, publish app + CLI zips, release notes from commits since the previous tag + GitHub-generated PR list) and `scripts/bump-version.ps1`. Must run on Windows (`net10.0-windows`, WinForms/D3D tests). PowerShell pitfall: a function named `Git` shadows `git.exe` (functions win, case-insensitive) → infinite recursion with no output; use `Invoke-Git`. README + repo description/topics added.
