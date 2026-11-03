@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using CodeWalker.GameFiles;
-using CodeWalker.World;
 using GtaAtlas.Core;
 using GtaAtlas.Core.Game;
 using GtaAtlas.Render;
@@ -30,9 +29,9 @@ public class GameAssetsTests(ITestOutputHelper output)
         // DLC prop: archetypes of every DLC are loaded, not just base.
         Assert.NotNull(assets.Cache.GetArchetype(JenkHash.GenHash("h4_prop_x17_sub")));
 
-        var vehicle = new Vehicle();
-        await Task.Run(() => vehicle.Init("adder", assets.Cache), TestContext.Current.CancellationToken);
-        Assert.NotNull(vehicle.Yft?.Fragment);
+        var adder = await Task.Run(() => assets.LoadVehicle("adder"), TestContext.Current.CancellationToken);
+        Assert.NotNull(adder);
+        Assert.Null(await Task.Run(() => assets.LoadVehicle("not_a_vehicle"), TestContext.Current.CancellationToken));
         output.WriteLine($"total {sw.ElapsedMilliseconds} ms");
     }
 

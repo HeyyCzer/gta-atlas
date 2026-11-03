@@ -76,11 +76,8 @@ namespace GtaAtlas.Render
             var request = ++_request;
             Load(request, () =>
             {
-                var vehicle = new Vehicle();
-                vehicle.Init(name, _assets.Cache); // blocks until the yft is loaded by the content thread
-                if (vehicle.Yft?.Fragment?.Drawable is not { } drawable)
-                    throw new InvalidOperationException("Vehicle model not found in game files.");
-                return new VehicleItem(vehicle, drawable.BoundingCenter, drawable.BoundingSphereRadius);
+                var fragment = _assets.LoadVehicle(name) ?? throw new InvalidOperationException("Vehicle model not found in game files.");
+                return new VehicleItem(fragment, JenkHash.GenHash(name.ToLowerInvariant()));
             });
         }
 
@@ -297,16 +294,19 @@ namespace GtaAtlas.Render
 
         private sealed class VehicleItem : ViewItem
         {
-            private readonly Vehicle _vehicle;
+            private readonly FragType _fragment;
+            private readonly uint _txd;
 
-            public VehicleItem(Vehicle vehicle, Vector3 center, float radius)
+            /// <summary>Same as Renderer.RenderVehicle, without CodeWalker's Vehicle (which needs the slow vehicles.meta load).</summary>
+            public VehicleItem(FragType fragment, uint txd)
             {
-                _vehicle = vehicle;
-                Center = center;
-                Radius = radius;
+                _fragment = fragment;
+                _txd = txd; // the vehicle's own ytd shares its model name
+                Center = fragment.Drawable.BoundingCenter;
+                Radius = fragment.Drawable.BoundingSphereRadius;
             }
 
-            public override void Render(Renderer renderer) => renderer.RenderVehicle(_vehicle);
+            public override void Render(Renderer renderer) => renderer.RenderFragment(null, null, _fragment, _txd);
         }
     }
 }

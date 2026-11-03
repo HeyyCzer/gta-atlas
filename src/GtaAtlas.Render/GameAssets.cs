@@ -26,6 +26,7 @@ namespace GtaAtlas.Render
                 EnableDlc = true, // with no SelectedDlc, Init picks the latest one
                 LoadAudio = false,
                 LoadPeds = false,
+                LoadVehicles = false, // ~3 s of vehicles.meta/carcols; the preview loads the yft directly (LoadVehicle)
                 BuildExtendedJenkIndex = false,
             };
             Ready = Task.Run(() => Cache.Init(s => Status = s, error ?? (_ => { })));
@@ -42,6 +43,29 @@ namespace GtaAtlas.Render
         public string Status { get; private set; } = "Starting";
 
         public static GameAssets Start(GameInstall install, Action<string> error = null) => new(install, error);
+
+        /// <summary>
+        /// Loads a vehicle model (<c>name_hi.yft</c>, falling back to <c>name.yft</c>), blocking until the content
+        /// thread has read it. Returns null if the game has no such model. Call off the UI thread, after <see cref="Ready"/>.
+        /// </summary>
+        public FragType LoadVehicle(string name, int timeoutMs = 10000)
+        {
+            name = name.ToLowerInvariant();
+            foreach (var model in new[] { name + "_hi", name })
+            {
+                var hash = JenkHash.GenHash(model);
+                var deadline = Environment.TickCount64 + timeoutMs;
+                var yft = Cache.GetYft(hash);
+                while (yft is { Loaded: false } && Environment.TickCount64 < deadline)
+                {
+                    Thread.Sleep(2);
+                    yft = Cache.GetYft(hash); // re-request: the cache drops requests not renewed within 0.5 s
+                }
+                if (yft?.Fragment?.Drawable != null)
+                    return yft.Fragment;
+            }
+            return null;
+        }
 
         private void Pump()
         {
