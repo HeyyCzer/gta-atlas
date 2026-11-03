@@ -30,12 +30,10 @@ namespace GtaAtlas.Render
 
         private volatile bool _sceneOpen;
         private volatile ViewItem _item;
-        private volatile bool _lodDirty;
         private volatile bool _showBounds;
-        private DetailLevel _lod;
+        private volatile DetailLevel _lod;
         private bool _wireframe;
-        private ViewItem _flaggedItem;                          // render thread only
-        private readonly HashSet<DrawableBase> _flagged = new(); // render thread only
+        private readonly LodFilter _lodFilter = new(); // render thread only
         private int _request; // bumps on every Show*, so stale async loads are dropped
         private System.Drawing.Point _mouse;
         private MouseButtons _drag;
@@ -77,11 +75,7 @@ namespace GtaAtlas.Render
         public DetailLevel Lod
         {
             get => _lod;
-            set
-            {
-                _lod = value;
-                _lodDirty = true;
-            }
+            set => _lod = value;
         }
 
         public bool Wireframe
@@ -112,22 +106,13 @@ namespace GtaAtlas.Render
         public void ShowProp(uint hash)
         {
             var request = ++_request;
-            LoadItem(request, () =>
-            {
-                var arch = _assets.Cache.GetArchetype(hash) ?? throw new InvalidOperationException("Archetype not found in game files.");
-                var drawable = _assets.LoadDrawable(arch) ?? throw new InvalidOperationException("Model file not found in game files.");
-                return new ArchetypeItem(arch, drawable);
-            });
+            LoadItem(request, () => ViewItem.Prop(_assets, hash));
         }
 
         public void ShowVehicle(string name)
         {
             var request = ++_request;
-            LoadItem(request, () =>
-            {
-                var models = _assets.LoadVehicle(name) ?? throw new InvalidOperationException("Vehicle model not found in game files.");
-                return new VehicleItem(models, JenkHash.GenHash(name.ToLowerInvariant()));
-            });
+            LoadItem(request, () => ViewItem.Vehicle(_assets, name));
         }
 
         public void Clear()
@@ -183,13 +168,7 @@ namespace GtaAtlas.Render
             }
         }
 
-        private static readonly System.Reflection.PropertyInfo ClearColour = typeof(DXManager).GetProperty(nameof(DXManager.clearcolour));
-
-        private void ApplyBackground()
-        {
-            var c = BackColor;
-            ClearColour.SetValue(_renderer.DXMan, new Color(c.R, c.G, c.B, (byte)255)); // setter is private upstream
-        }
+        private void ApplyBackground() => _renderer.DXMan.SetClearColour(System.Drawing.Color.FromArgb(255, BackColor));
 
         protected override void OnLoad(EventArgs e)
         {
@@ -249,11 +228,12 @@ namespace GtaAtlas.Render
             try
             {
                 var item = _item;
+                var lod = _lod;
                 _renderer.Update(elapsed, _mouse.X, _mouse.Y);
                 _renderer.BeginRender(context);
                 _renderer.RenderSkyAndClouds();
-                item?.Render(_renderer, _lod);
-                ApplyLod(item);
+                item?.Render(_renderer, lod);
+                _lodFilter.Apply(_renderer, item, lod);
                 _renderer.RenderQueued();
                 if (_showBounds && item != null)
                 {
@@ -273,30 +253,6 @@ namespace GtaAtlas.Render
             finally
             {
                 Monitor.Exit(_renderer.RenderSyncRoot);
-            }
-        }
-
-        /// <summary>
-        /// Hides the models of other LODs in every drawable rendered this frame. Drawables seen for the first time were
-        /// already queued with all levels, so they show mixed for one frame. Flags are reset per item so the
-        /// renderer's dictionary doesn't keep old models alive.
-        /// </summary>
-        private void ApplyLod(ViewItem item)
-        {
-            var flags = _renderer.SelectionModelDrawFlags;
-            if (item != _flaggedItem || _lodDirty)
-            {
-                _lodDirty = false;
-                _flaggedItem = item;
-                flags.Clear();
-                _flagged.Clear();
-            }
-            foreach (var rendered in _renderer.RenderedDrawables)
-            {
-                if (rendered.Drawable == null || !_flagged.Add(rendered.Drawable))
-                    continue;
-                foreach (var model in ModelLods.Hidden(rendered.Drawable, _lod))
-                    flags[model] = false;
             }
         }
 
@@ -357,58 +313,6 @@ namespace GtaAtlas.Render
             base.OnKeyDown(e);
             if (e.KeyCode == Keys.R && e.Modifiers == Keys.None)
                 ResetCamera();
-        }
-
-        private abstract class ViewItem
-        {
-            public Vector3 Center { get; protected init; }
-            public float Radius { get; protected init; }
-            public Vector3 BBMin { get; protected init; }
-            public Vector3 BBMax { get; protected init; }
-            public IReadOnlyList<DetailLevel> Lods { get; protected init; }
-            public abstract void Render(Renderer renderer, DetailLevel lod);
-        }
-
-        private sealed class ArchetypeItem : ViewItem
-        {
-            private readonly Archetype _archetype;
-
-            public ArchetypeItem(Archetype archetype, DrawableBase drawable)
-            {
-                _archetype = archetype;
-                Center = archetype.BSCenter;
-                Radius = archetype.BSRadius;
-                BBMin = archetype.BBMin;
-                BBMax = archetype.BBMax;
-                Lods = ModelLods.Available(drawable);
-            }
-
-            public override void Render(Renderer renderer, DetailLevel lod) => renderer.RenderArchetype(_archetype, null, null, false);
-        }
-
-        private sealed class VehicleItem : ViewItem
-        {
-            private readonly VehicleModels _models;
-            private readonly uint _txd;
-
-            /// <summary>Same as Renderer.RenderVehicle, without CodeWalker's Vehicle (which needs the slow vehicles.meta load).</summary>
-            public VehicleItem(VehicleModels models, uint txd)
-            {
-                _models = models;
-                _txd = txd; // the vehicle's own ytd shares its model name
-                var main = (models.Hi ?? models.Lods).Drawable;
-                Center = main.BoundingCenter;
-                Radius = main.BoundingSphereRadius;
-                BBMin = main.BoundingBoxMin;
-                BBMax = main.BoundingBoxMax;
-                Lods = ModelLods.Vehicle(models.Hi?.Drawable, models.Lods?.Drawable);
-            }
-
-            public override void Render(Renderer renderer, DetailLevel lod)
-            {
-                var hi = ModelLods.UsesHi(_models.Hi?.Drawable, _models.Lods?.Drawable, lod);
-                renderer.RenderFragment(null, null, hi ? _models.Hi : _models.Lods, _txd);
-            }
         }
     }
 }
