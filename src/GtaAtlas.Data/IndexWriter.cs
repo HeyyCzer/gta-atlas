@@ -78,8 +78,8 @@ public static class IndexWriter
         SqliteConnection c, SqliteTransaction tx, IReadOnlyCollection<AssetInput> assets, Dictionary<string, long> dlcIds)
     {
         using var insertAsset = Prepare(c, tx,
-            "INSERT INTO asset(id, kind, key, name, hash, display_name, dlc_id, data) VALUES ($id, $kind, $key, $name, $hash, $display, $dlc, $data)",
-            "$id", "$kind", "$key", "$name", "$hash", "$display", "$dlc", "$data");
+            "INSERT INTO asset(id, kind, key, name, sort_name, hash, display_name, dlc_id, data) VALUES ($id, $kind, $key, $name, $sort, $hash, $display, $dlc, $data)",
+            "$id", "$kind", "$key", "$name", "$sort", "$hash", "$display", "$dlc", "$data");
         using var insertFile = Prepare(c, tx,
             "INSERT INTO source_file(id, dlc_id, path) VALUES ($id, $dlc, $path)",
             "$id", "$dlc", "$path");
@@ -103,7 +103,7 @@ public static class IndexWriter
                 throw new InvalidOperationException($"Duplicate asset {a.Kind}/{a.Key}.");
 
             var tags = a.Tags.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            Run(insertAsset, id, a.Kind, a.Key, a.Name, (long)a.Hash, a.DisplayName, DlcId(dlcIds, a.Dlc), a.Data);
+            Run(insertAsset, id, a.Kind, a.Key, a.Name, NaturalSort.Key(a.Name), (long)a.Hash, a.DisplayName, DlcId(dlcIds, a.Dlc), a.Data);
 
             foreach (var s in a.Sources)
             {

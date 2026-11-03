@@ -62,7 +62,13 @@ internal static class Schema
             key  TEXT NOT NULL,
             PRIMARY KEY (kind, key)
         ) WITHOUT ROWID;
-        """ + Indexes,
+        """,
+        // v2: natural sort key. Filled from the existing names (natural_key is registered by AtlasDb.Migrate)
+        // so databases indexed before it keep their favorites without a reindex.
+        """
+        ALTER TABLE asset ADD COLUMN sort_name TEXT NOT NULL DEFAULT '';
+        UPDATE asset SET sort_name = natural_key(name);
+        """ + DropIndexes + Indexes,
     ];
 
     /// <summary>Secondary indexes. Also run by <see cref="IndexWriter"/> after bulk load, which builds without them.</summary>
@@ -71,9 +77,9 @@ internal static class Schema
 
         CREATE UNIQUE INDEX IF NOT EXISTS ux_asset_kind_key ON asset(kind, key);
         CREATE INDEX IF NOT EXISTS ix_asset_kind_dlc ON asset(kind, dlc_id);
-        -- Browse order: named assets first, hash-only names ("0x1A2B3C4D") last. Must match AssetQueries.BrowseOrder.
-        CREATE INDEX IF NOT EXISTS ix_asset_kind_name ON asset(kind, name GLOB '0x*', name);
-        CREATE INDEX IF NOT EXISTS ix_asset_name ON asset(name GLOB '0x*', name);
+        -- Browse order: named assets first, hash-only names ("0x1A2B3C4D") last, numbers by value. Must match AssetQueries.BrowseOrder.
+        CREATE INDEX IF NOT EXISTS ix_asset_kind_name ON asset(kind, name GLOB '0x*', sort_name);
+        CREATE INDEX IF NOT EXISTS ix_asset_name ON asset(name GLOB '0x*', sort_name);
         CREATE INDEX IF NOT EXISTS ix_asset_hash ON asset(hash);
         CREATE INDEX IF NOT EXISTS ix_asset_parent ON asset(parent_id);
         CREATE UNIQUE INDEX IF NOT EXISTS ux_source_file_path ON source_file(path);

@@ -5,8 +5,8 @@ namespace GtaAtlas.Data;
 
 public sealed class AssetQueries(AtlasDb db)
 {
-    /// <summary>Named assets first, then hash-only names; matches the expression indexes in <see cref="Schema"/>.</summary>
-    private const string BrowseOrder = "ORDER BY a.name GLOB '0x*', a.name";
+    /// <summary>Named assets first, then hash-only names; numbers by value (<see cref="NaturalSort"/>). Matches the expression indexes in <see cref="Schema"/>.</summary>
+    private const string BrowseOrder = "ORDER BY a.name GLOB '0x*', a.sort_name";
 
     private const string SummaryColumns = "a.id AS Id, a.kind AS Kind, a.key AS Key, a.name AS Name, a.hash AS Hash, a.display_name AS DisplayName, d.name AS Dlc";
 
@@ -45,7 +45,7 @@ public sealed class AssetQueries(AtlasDb db)
         var from = $"FROM asset a WHERE {where}";
         var order = string.IsNullOrEmpty(text)
             ? BrowseOrder
-            : "ORDER BY (a.name = @exact COLLATE NOCASE) DESC, (a.name LIKE @prefix) DESC, length(a.name), a.name";
+            : "ORDER BY (a.name = @exact COLLATE NOCASE) DESC, (a.name LIKE @prefix) DESC, length(a.name), a.sort_name";
         p.Add("exact", text);
         p.Add("prefix", LikeEscape(text ?? "") + "%");
         p.Add("limit", q.Limit);

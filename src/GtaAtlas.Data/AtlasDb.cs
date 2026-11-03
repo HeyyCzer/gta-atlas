@@ -62,6 +62,7 @@ public sealed class AtlasDb
     private void Migrate()
     {
         using var c = Connect();
+        c.CreateFunction("natural_key", (string name) => NaturalSort.Key(name), isDeterministic: true);
         var version = c.ExecuteScalar<int>("PRAGMA user_version");
         for (var i = version; i < Schema.Migrations.Length; i++)
         {

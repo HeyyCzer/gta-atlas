@@ -31,6 +31,9 @@ public sealed class AssetQueriesTests : IDisposable
         Asset(AssetKind.Prop, "v_med_bench1", 3, DlcNames.Base, null, ["props_2"]),
         Asset(AssetKind.Prop, "bench", 4, "mp2026_01", null, []),
         Asset(AssetKind.Prop, "0x0000000A", 10, DlcNames.Base, null, []),
+        Asset(AssetKind.Clothing, "C/0/10/F", 20, DlcNames.Base, null, []),
+        Asset(AssetKind.Clothing, "C/0/2/F", 21, DlcNames.Base, null, []),
+        Asset(AssetKind.Clothing, "C/0/1/F", 22, DlcNames.Base, null, []),
         Asset(AssetKind.AnimDict, "amb@world_human_seat", 5, DlcNames.Base, null, []),
         Asset(AssetKind.Anim, "amb@world_human_seat/idle_a", 6, DlcNames.Base, null, []) with
         {
@@ -124,6 +127,34 @@ public sealed class AssetQueriesTests : IDisposable
     {
         var r = _q.Search(new SearchQuery { Kind = AssetKind.Prop });
         Assert.Equal(["bench", "prop_bench_01a", "v_med_bench1", "0x0000000A"], r.Items.Select(i => i.Name));
+    }
+
+    [Fact]
+    public void Browse_orders_numbers_by_value()
+    {
+        var r = _q.Search(new SearchQuery { Kind = AssetKind.Clothing });
+        Assert.Equal(["C/0/1/F", "C/0/2/F", "C/0/10/F"], r.Items.Select(i => i.Name));
+    }
+
+    [Fact]
+    public void Migration_fills_sort_key_of_existing_database()
+    {
+        // Rewind to schema v1: no sort_name column and its indexes.
+        using (var c = _db.Connect())
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = """
+                DROP INDEX ix_asset_kind_name; DROP INDEX ix_asset_name;
+                ALTER TABLE asset DROP COLUMN sort_name;
+                PRAGMA user_version = 1;
+                """;
+            cmd.ExecuteNonQuery();
+        }
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+        var q = new AssetQueries(AtlasDb.Open(_db.Path));
+        var r = q.Search(new SearchQuery { Kind = AssetKind.Clothing });
+        Assert.Equal(["C/0/1/F", "C/0/2/F", "C/0/10/F"], r.Items.Select(i => i.Name));
     }
 
     [Fact]

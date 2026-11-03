@@ -99,7 +99,7 @@ Cada fase termina em algo utilizável e verificável. Marque `[x]` ao concluir e
 - [x] Favoritos persistidos no DB, filtrados dentro de cada categoria (sem aba própria)
 - [x] Tela de primeira execução / Reindex: escolher/detectar pasta → indexar com barra de progresso (`IndexForm`); erros em `logs\index.log`
 - [x] Ícone do app (`Resources/atlas.ico` 16–256 px, gerado por `make-icon.py`): globo teal + marcador, sem marca Rockstar
-- [ ] Ordenação natural em nomes de roupa (`C/0/10/F` vem antes de `C/0/2/F`)
+- [x] Ordenação natural: números por valor (`C/0/2/F` antes de `C/0/10/F`) via coluna `sort_name` (`NaturalSort.Key`, dígitos com zero à esquerda) nos índices de browse
 
 **Pronto quando:** busca em ~50k props responde em < 50 ms, sem preview 3D ainda.
 
@@ -181,3 +181,4 @@ Referência de padrão: `..\grzyClothTool\CodeWalker\CodeWalker\CustomPedsForm.c
 - 2026-11-02 — Fase 2 concluída (falta só ordenação natural de roupas). Medido em 471k assets: browse por kind 100 ms → 5–9 ms (índices de expressão `(kind, name GLOB '0x*', name)` + count sem JOIN de dlc); nomes só-hash (`0x…`) vão pro fim; favoritos 632 → 16 ms (subquery partindo de `favorite`). Busca com palavra de 1–2 letras ainda ~250 ms (LIKE full scan) — UI é async, aceitável. `GetFolderPath` ignora `LOCALAPPDATA` → `GTA_ATLAS_HOME` sobrepõe a pasta de dados (testar primeira execução: `$env:GTA_ATLAS_HOME="..."`). `atlas search --repeat n` mede query quente.
 - 2026-11-02 — Redesign da UI (pedido do usuário, referência visual forge.plebmasters): tudo owner-draw com tema único em `Theme`; painel lateral de detalhe → modal; favoritos por categoria; DLCs ordenáveis. Glyphs de ícone precisam de `Theme.Icon*` (fonte de texto mostra "·"). `TextBox.PlaceholderText` em vez de pintar por baixo (o TextBox cobre).
 - 2026-11-02 — Smooth scroll (grid, lista, detalhe, DLCs, dropdown): `ScrollAnimator` (easing exponencial por tempo, alvo acumula giros da roda) dirigido por `FrameClock` (thread em `DwmFlush` = 1 frame por vsync; `Forms.Timer` tem ~15,6 ms de resolução e travava a 144 Hz) com pintura síncrona. Grid pintava em ~8,5 ms → cache de linhas em bitmap (32bppRgb, GDI text funciona) + tile placeholder por kind: ~2 ms/frame em 2576 px, sem frames > 7 ms medidos. Hover/seleção desenhados ao vivo por cima.
+- 2026-11-02 — Fase 2 concluída: ordenação natural. Primeira migration real (v2: `sort_name` preenchido por função SQLite `natural_key`) em vez de editar v1, para não perder favoritos; ~7 s uma vez no DB de 471k assets, sem reindex. v1 agora só cria tabelas; índices vêm na v2.
