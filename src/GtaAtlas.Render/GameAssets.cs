@@ -29,7 +29,12 @@ namespace GtaAtlas.Render
                 LoadVehicles = false, // ~3 s of vehicles.meta/carcols; the preview loads the yft directly (LoadVehicle)
                 BuildExtendedJenkIndex = false,
             };
-            Ready = Task.Run(() => Cache.Init(s => Status = s, error ?? (_ => { })));
+            error ??= _ => { };
+            Ready = Task.Run(() =>
+            {
+                if (!CacheInit.TryInitWithoutMaps(Cache, install, s => Status = s, error))
+                    Cache.Init(s => Status = s, error);
+            });
             _pump = new Thread(Pump) { IsBackground = true, Name = "GameAssets content" };
             _pump.Start();
         }
