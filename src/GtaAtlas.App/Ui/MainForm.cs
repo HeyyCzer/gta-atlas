@@ -53,7 +53,7 @@ internal sealed class MainForm : Form
         _settings = settings;
         _db = db;
         _queries = new AssetQueries(db);
-        _thumbnails = new Thumbnails(new ThumbnailStore(paths.Thumbnails));
+        _thumbnails = new Thumbnails(new ThumbnailStore(paths.Thumbnails), Math.Max(50, settings.ThumbnailCacheMb) * (1L << 20));
         _grid.Thumbnails = _thumbnails;
 
         Text = "GTA Atlas";
@@ -434,7 +434,10 @@ internal sealed class MainForm : Form
         _top.PerformLayout();
         while (_thumbnails.Generating is { } p && !IsDisposed)
         {
-            _nav.SetLoading("Generating thumbnails", $"{p.Done:N0} of {p.Total:N0}", (double)p.Done / p.Total);
+            var detail = $"{p.Done:N0} of {p.Total:N0}";
+            if (_thumbnails.LimitReached)
+                detail += $" · {_settings.ThumbnailCacheMb:N0} MB cache full, oldest removed";
+            _nav.SetLoading("Generating thumbnails", detail, (double)p.Done / p.Total);
             await Task.Delay(250);
         }
         if (IsDisposed)

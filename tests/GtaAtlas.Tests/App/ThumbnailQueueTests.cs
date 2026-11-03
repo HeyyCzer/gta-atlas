@@ -115,6 +115,32 @@ public class ThumbnailStoreTests
         File.Delete(store.PathFor(key)); // not locked by Load
     }
 
+    [Fact]
+    public void Trim_deletes_least_recently_used_down_to_the_target()
+    {
+        using var dir = new TempDir();
+        var store = new ThumbnailStore(dir.Path);
+        var keys = Enumerable.Range(0, 5).Select(i => new ThumbKey(AssetKind.Prop, (uint)i, $"p{i}")).ToList();
+        var start = DateTime.UtcNow.AddHours(-1);
+        foreach (var (key, i) in keys.Select((k, i) => (k, i)))
+        {
+            using (var bitmap = new Bitmap(32, 32))
+                store.Save(key, bitmap);
+            File.SetLastWriteTimeUtc(store.PathFor(key), start.AddMinutes(i)); // p0 oldest
+        }
+        using (store.Load(keys[0])) { } // shown again: now the most recent
+        store.MarkFailed(new ThumbKey(AssetKind.Prop, 99, "gone"), "no model");
+        File.WriteAllText(store.PathFor(keys[0]) + ".tmp", "partial");
+        var size = new FileInfo(store.PathFor(keys[0])).Length;
+
+        Assert.Equal(0, store.Trim(maxBytes: size * 5, targetBytes: size * 2)); // under the limit: untouched
+        Assert.False(File.Exists(store.PathFor(keys[0]) + ".tmp"));
+
+        Assert.Equal(3, store.Trim(maxBytes: size * 4, targetBytes: size * 2));
+        Assert.Equal([true, false, false, false, true], keys.Select(store.Exists));
+        Assert.True(store.IsFailed(new ThumbKey(AssetKind.Prop, 99, "gone")));
+    }
+
     [Theory]
     [InlineData(AssetKind.Prop, true)]
     [InlineData(AssetKind.Vehicle, true)]

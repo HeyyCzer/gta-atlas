@@ -13,8 +13,11 @@ internal sealed class Thumbnails : IDisposable
 {
     private const int MaxBitmaps = 96;
     private const int UpdateDelayMs = 80;
+    private const int TrimEverySaves = 200;
 
     private readonly ThumbnailStore _store;
+    private readonly long _maxBytes;
+    private int _savesSinceTrim;
     private readonly ThumbnailQueue<ThumbKey> _queue = new();
     private readonly SynchronizationContext _ui;
     private readonly Thread _worker;
@@ -32,9 +35,11 @@ internal sealed class Thumbnails : IDisposable
     private int _backgroundDone;
     private int _backgroundTotal;
 
-    public Thumbnails(ThumbnailStore store)
+    /// <param name="maxBytes">Disk budget for saved thumbnails (<see cref="ThumbnailStore.Trim"/>).</param>
+    public Thumbnails(ThumbnailStore store, long maxBytes)
     {
         _store = store;
+        _maxBytes = maxBytes;
         _ui = SynchronizationContext.Current ?? throw new InvalidOperationException("Create on the UI thread.");
         _worker = new Thread(Work) { IsBackground = true, Name = "Thumbnails", Priority = ThreadPriority.BelowNormal };
         _worker.Start();
@@ -98,7 +103,14 @@ internal sealed class Thumbnails : IDisposable
         _queue.ClearBackground();
         Interlocked.Exchange(ref _backgroundDone, 0);
         Interlocked.Exchange(ref _backgroundTotal, 0);
+        LimitReached = false;
     }
+
+    /// <summary>
+    /// Whether thumbnails made by <see cref="GenerateAll"/> hit the disk budget, so older ones are being deleted to make
+    /// room (the list is bigger than the cache).
+    /// </summary>
+    public bool LimitReached { get; private set; }
 
     /// <summary>Progress of <see cref="GenerateAll"/>; null when idle.</summary>
     public (int Done, int Total)? Generating
@@ -120,6 +132,7 @@ internal sealed class Thumbnails : IDisposable
 
     private void Work()
     {
+        Trim(background: false);
         while (_queue.Take(out var key, out var background))
         {
             try
@@ -176,10 +189,32 @@ internal sealed class Thumbnails : IDisposable
         }
 
         _store.Save(key, bitmap);
+        if (++_savesSinceTrim >= TrimEverySaves)
+            Trim(background);
         if (background)
             bitmap.Dispose();
         else
             Deliver(key, bitmap, failed: false);
+    }
+
+    /// <summary>Keeps saved thumbnails within the budget, down to 90% so this doesn't run after every save.</summary>
+    private void Trim(bool background)
+    {
+        _savesSinceTrim = 0;
+        try
+        {
+            var deleted = _store.Trim(_maxBytes, _maxBytes / 10 * 9);
+            if (deleted > 0)
+            {
+                AppLog.Write("thumbs", [$"cache over {_maxBytes >> 20} MB: deleted {deleted} least recently used"]);
+                if (background)
+                    LimitReached = true;
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            AppLog.Write("thumbs", [$"trim: {e.Message}"]);
+        }
     }
 
     /// <summary>Hands a result to the UI thread (which owns the bitmaps from then on).</summary>

@@ -118,10 +118,11 @@ Cada fase termina em algo utilizável e verificável. Marque `[x]` ao concluir e
 **Pronto quando:** abrir qualquer prop/veículo mostra modelo texturizado e orbitável.
 
 ### Fase 4 — Thumbnails
-- [ ] Captura offscreen: ViewportForm oculto 256×256, renderizar asset e ler o backbuffer (staging texture → PNG)
-- [ ] Fila em background priorizando cards visíveis; cache PNG em `thumbs\{kind}\{hash}.png`
-- [ ] Placeholder enquanto não existe; botão "gerar todos" opcional
-- [ ] Enquadramento automático pelo bounding box
+- [x] Captura offscreen: `ThumbnailRenderer` (384×256) = janela oculta com device próprio numa thread STA dedicada (com message loop; a janela precisa ser bombeada/destruída pela thread que a criou). Espera geometria + texturas na GPU (4 frames estáveis, timeout 8 s), resolve MSAA → staging → bytes. Fundo transparente por *difference matting*: renderiza sobre preto e sobre branco, alpha = 1 − (branco − preto) (`ThumbnailMatte`), preserva bordas e vidro
+- [x] Fila em background priorizando cards visíveis (`ThumbnailQueue`: pilha, último card pintado primeiro, cap 400; gerar-todos é FIFO de menor prioridade); cache PNG em `thumbs\{kind}\{hash:x8}.png` (`ThumbnailStore`), `.fail` com o motivo para modelos inexistentes/vazios. Pausa enquanto o detalhe 3D está aberto
+- [x] Placeholder por kind enquanto não existe; botão "Generate thumbnails" (props/veículos do resultado atual, progresso na sidebar, Stop)
+- [x] Enquadramento automático pelo bounding box (`Framing.Fit`: distância para caber os 8 cantos + recentragem da projeção); props vistos de −Y, veículos de +Y (frente ¾); luz vem do lado da câmera
+- [x] Limite de disco: `settings.json` → `ThumbnailCacheMb` (padrão 500). LRU pela data de escrita (tocada a cada leitura); ao abrir e a cada 200 salvos apaga os mais antigos até 90%
 
 ### Fase 5 — Veículos e Peds completos
 
@@ -187,3 +188,4 @@ Referência de padrão: `..\grzyClothTool\CodeWalker\CodeWalker\CustomPedsForm.c
 - 2026-11-03 — Fase 3, viewport: renderer do CodeWalker roda em .NET 10 sem ajustes (risco do roadmap resolvido). Profile do init do `GameFileCache` (11 s): veículos 3,2 s, RPF scan 2,1 s, archetypes 1,3 s, dicts globais 1,2 s, mapas 0,9 s, gtxd 0,8 s. Cortados veículos (yft direto) e mapas (reflection) → ~5 s, 630 → ~400 MB. Corrigido: contagem da sidebar para categorias por tag (IPLs). Validação visual com SendKeys + screenshot (script descartável); cliques simulados (`mouse_event`) não acionavam a sidebar (corrigido em 2026-11-03: faltava DPI awareness).
 - 2026-11-03 — Fase 3, ferramentas do viewport. Bug achado: `SelectionFlagsTestAll` sem flags desenhava todos os LODs sobrepostos (`AllModels`). `adder_hi.yft` só tem High; os LODs menores ficam em `adder.yft` → veículo carrega os dois. Props podem vir de `.yft` (ex. `prop_bench_01a`), não só ydr/ydd. Validação visual: script com SendKeys; clique na sidebar funciona com `SetProcessDPIAware` + coordenadas físicas. App da solução sai em `bin\x64\Debug` (o `bin\Debug` é de builds avulsos do projeto, pode estar velho).
 - 2026-11-03 — Barra de progresso do cache: avanço quase linear no tempo (3% em 0,6 s, 39% em 2,5 s, 76% em 5 s, pronto ~6 s). Status do upstream durante as etapas são caminhos de arquivo crus → UI usa rótulo por etapa (`InitProgress.Label`). Recalibrar pesos: forçar falha no `GameAssetsTests` para ver a linha `stages:` (saída de teste aprovado não aparece no MTP).
+- 2026-11-03 — Fase 4 concluída. Thumbnail: prop ~140 ms, veículo ~220 ms; gerar-todos ~9 veículos/s. PNG 384×256 com alpha: prop ~14 KB, veículo ~37 KB (todos os props ≈ 2,2 GB → por isso o limite LRU). Avaliado formato: JPEG perde a transparência, WebP precisaria de SkiaSharp (GDI+ não codifica) — fica PNG; trocar isola-se no `ThumbnailStore`. Achados: Close de janela criada em thread sem message loop trava (teste travou) → thread STA própria; corpo do veículo sai branco (pintura vem do carcols, Fase 5); helicópteros saem pequenos (bbox inclui rotor). Working set com detalhe aberto ~1,5 GB (2º device + cache de renderables).
