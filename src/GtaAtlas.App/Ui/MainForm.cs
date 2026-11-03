@@ -38,6 +38,7 @@ internal sealed class MainForm : Form
 
     private BrowseState _state = new();
     private IReadOnlyDictionary<string, int> _counts = new Dictionary<string, int>();
+    private Dictionary<Category, int> _taggedCounts = [];
     private int _generation;
 
     public MainForm(AppPaths paths, AtlasSettings settings, AtlasDb db)
@@ -208,6 +209,8 @@ internal sealed class MainForm : Form
     private void LoadCatalog()
     {
         _counts = _queries.CountsByKind();
+        _taggedCounts = Category.Sidebar.Where(c => c.Tags.Count > 0)
+            .ToDictionary(c => c, c => _queries.Search(new SearchQuery { Kind = c.Kind, Tags = c.Tags, Limit = 0 }).Total);
         var dlcs = _queries.Dlcs();
 
         _dlc.Items =
@@ -231,7 +234,7 @@ internal sealed class MainForm : Form
         { IsDlcList: true } => _dlcTable.Count,
         { Kind: null } => _counts.Values.Sum(),
         { Tags.Count: 0, Kind: { } k } => _counts.GetValueOrDefault(k),
-        _ => null,
+        _ => _taggedCounts.TryGetValue(c, out var n) ? n : null,
     };
 
     private void SetCategory(Category category)
