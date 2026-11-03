@@ -104,14 +104,16 @@ Cada fase termina em algo utilizável e verificável. Marque `[x]` ao concluir e
 **Pronto quando:** busca em ~50k props responde em < 50 ms, sem preview 3D ainda.
 
 ### Fase 3 — Viewport 3D (núcleo do renderer)
-- [ ] `ViewportForm : Form, DXForm` (net10) usando `new Renderer(this, gameFileCache)`; `TopLevel=false`, `FormBorderStyle.None`, adicionado como filho do painel de detalhe
-- [ ] Shaders `.cso` copiados para a pasta de saída (`Shaders\`), como o CodeWalker espera
-- [ ] Orbit/pan/zoom, reset câmera, fundo configurável
-- [ ] Um único `GameFileCache` compartilhado no app (carregamento lento → iniciar em background no startup)
-- [ ] Carregar `.ydr`/`.ydd`/`.yft` pelo `GameFileCache` e exibir
-- [ ] Props no detalhe com viewport
+- [x] `ModelViewport : Form, DXForm` (`GtaAtlas.Render`) com `new Renderer(this, cache)`; `TopLevel=false`, hospedado no `PreviewPane` do `DetailForm`. Fica oculto até o 1º modelo carregar (Load → `Renderer.Start`); `Close()` explícito no Dispose libera o device (form filho não fecha com o pai)
+- [x] Shaders `.cso` copiados para `Shaders\` no output (transitivo via `GtaAtlas.Render`)
+- [x] Orbit (arrastar), pan (botão direito/meio), zoom (roda), reset (duplo-clique / R); fundo = `Theme.Surface` (`Background`, via reflection em `DXManager.clearcolour`; HDR off porque o PostProcessor limpa com azul fixo)
+- [x] `GameAssets`: um `GameFileCache` por execução, iniciado em background no `MainForm.OnShown` + thread que bombeia `ContentThreadProc`. Init 11 s → ~5 s: `LoadVehicles/Peds/Audio=false` e `CacheInit` pula dicionários de ymap e map caches (reflection na sequência privada do `InitDlc`, fallback pro `Init` normal; `CacheInitTests` compara com o fonte)
+- [x] Props (`RenderArchetype`) e veículos (`GameAssets.LoadVehicle` → `name_hi.yft`/`name.yft` + `RenderFragment`, sem `vehicles.meta`) no detalhe; ←/→ troca na hora com cache pronto. Setas de navegação no rodapé (nada pinta sobre a janela DX)
+- [ ] Confirmar veículos texturizados no app (só validado por teste de integração)
 - [ ] Toggle wireframe / bounds / skeleton; seletor de LOD
 - [ ] Liberação de recursos GPU ao trocar asset (sem vazamento)
+- [ ] Progresso do carregamento do cache visível na janela principal (hoje só aparece no detalhe)
+- [ ] Opcional: scan de RPFs em paralelo (~2 s seriais; exige reflection pesada no `RpfManager`)
 
 **Pronto quando:** abrir qualquer prop/veículo mostra modelo texturizado e orbitável.
 
@@ -156,9 +158,9 @@ Referência de padrão: `..\grzyClothTool\CodeWalker\CodeWalker\CustomPedsForm.c
 
 ## Riscos conhecidos
 
-- **Runtime do renderer em .NET 10 ainda não testado** (só compilação). `Settings.Default` (ApplicationSettingsBase) usa valores default dos atributos; validar câmera/shaders no primeiro viewport. Fallback se algo travar: compilar CodeWalker net48 como DLL (padrão grzyClothTool).
-- **DXManager assume Form top-level** (assina `ResizeBegin/End`, `FormClosing`). Como filho, repassar resize manualmente se necessário.
-- **Memória**: `GameFileCache` completo usa vários GB; no indexer, carregar por tipo e liberar. No app, cache LRU só do que está em preview.
+- **Reflection em privados do CodeWalker** (`CacheInit`, `DXManager.clearcolour`): quebra se o upstream renomear; `CacheInitTests` avisa e o código cai no caminho normal.
+- **DXManager assume Form top-level**: `ClientSizeChanged` chega antes do `InitScene` (guardado em `BuffersResized`); render loop dorme 100 ms quando o app não é a janela ativa.
+- **Memória**: `GameFileCache` do app ~400 MB gerenciados após init (archetypes de todas as DLCs), cache de arquivos LRU de 2 GB. Indexer não usa o cache.
 - **SharpDX está descontinuado** mas funciona em .NET 10. Migrar para Vortice.Windows só se der problema.
 - **Nomes legíveis** dependem de GXT2 / dados externos; nem todo prop tem display name.
 - **Clothes**: nomes "bonitos" (ex. "Blue Bangles") vêm de shop meta + GXT; parte pode faltar.
@@ -182,3 +184,4 @@ Referência de padrão: `..\grzyClothTool\CodeWalker\CodeWalker\CustomPedsForm.c
 - 2026-11-02 — Redesign da UI (pedido do usuário, referência visual forge.plebmasters): tudo owner-draw com tema único em `Theme`; painel lateral de detalhe → modal; favoritos por categoria; DLCs ordenáveis. Glyphs de ícone precisam de `Theme.Icon*` (fonte de texto mostra "·"). `TextBox.PlaceholderText` em vez de pintar por baixo (o TextBox cobre).
 - 2026-11-02 — Smooth scroll (grid, lista, detalhe, DLCs, dropdown): `ScrollAnimator` (easing exponencial por tempo, alvo acumula giros da roda) dirigido por `FrameClock` (thread em `DwmFlush` = 1 frame por vsync; `Forms.Timer` tem ~15,6 ms de resolução e travava a 144 Hz) com pintura síncrona. Grid pintava em ~8,5 ms → cache de linhas em bitmap (32bppRgb, GDI text funciona) + tile placeholder por kind: ~2 ms/frame em 2576 px, sem frames > 7 ms medidos. Hover/seleção desenhados ao vivo por cima.
 - 2026-11-02 — Fase 2 concluída: ordenação natural. Primeira migration real (v2: `sort_name` preenchido por função SQLite `natural_key`) em vez de editar v1, para não perder favoritos; ~7 s uma vez no DB de 471k assets, sem reindex. v1 agora só cria tabelas; índices vêm na v2.
+- 2026-11-03 — Fase 3, viewport: renderer do CodeWalker roda em .NET 10 sem ajustes (risco do roadmap resolvido). Profile do init do `GameFileCache` (11 s): veículos 3,2 s, RPF scan 2,1 s, archetypes 1,3 s, dicts globais 1,2 s, mapas 0,9 s, gtxd 0,8 s. Cortados veículos (yft direto) e mapas (reflection) → ~5 s, 630 → ~400 MB. Corrigido: contagem da sidebar para categorias por tag (IPLs). Automação de UI em `scratchpad\drive.ps1` (SendKeys + screenshot); cliques simulados não acionam a sidebar.
