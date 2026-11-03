@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $props = Join-Path $root 'Directory.Build.props'
 
-function Git {
+function Invoke-Git {
     git -C $root @args
     if ($LASTEXITCODE -ne 0) { throw "git $($args -join ' ') failed (exit $LASTEXITCODE)" }
 }
@@ -59,9 +59,9 @@ $bytes = [IO.File]::ReadAllBytes($props)
 $bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
 [IO.File]::WriteAllText($props, [regex]::Replace($text, $pattern, "<Version>$next</Version>", 1), [Text.UTF8Encoding]::new($bom))
 
-Git add -- $props
-Git commit -m "Release $tag"
-Git tag -a $tag -m $tag
+Invoke-Git add -- $props
+Invoke-Git commit -m "Release $tag"
+Invoke-Git tag -a $tag -m $tag
 
 Write-Host "Bumped $current -> $next (tag $tag)" -ForegroundColor Green
 
@@ -71,8 +71,8 @@ if ($branch -ne 'main') {
 }
 
 if ($Push) {
-    Git push origin $branch
-    Git push origin $tag
+    Invoke-Git push origin $branch
+    Invoke-Git push origin $tag
     Write-Host "Pushed $branch and $tag. The Release workflow builds and publishes the release." -ForegroundColor Green
 }
 else {
