@@ -19,7 +19,7 @@ public sealed class PedExtractor : Extractor
             if (string.IsNullOrWhiteSpace(p.Name))
                 continue;
             var name = p.Name.ToLowerInvariant();
-            var pedType = string.IsNullOrEmpty(p.Pedtype) ? null : VehicleMeta.Humanize(p.Pedtype, "");
+            var pedType = PedTypeTag(p.Pedtype);
 
             yield return Raw(entry, AssetKind.Ped, name, Names.Joaat(name)) with
             {
@@ -37,4 +37,15 @@ public sealed class PedExtractor : Extractor
             };
         }
     }
+
+    /// <summary>Readable ped type for filtering; unresolved hashes ("hash_A49E591C") give no tag.</summary>
+    internal static string? PedTypeTag(string? pedType) => pedType?.ToLowerInvariant() switch
+    {
+        null or "" => null,
+        var t when t.StartsWith("hash_") => null,
+        "civmale" => "Civilian male",
+        "civfemale" => "Civilian female",
+        "swat" => "SWAT",
+        var t => VehicleMeta.Humanize(t, ""),
+    };
 }

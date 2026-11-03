@@ -15,7 +15,7 @@ public sealed record IndexResult(bool Skipped, int Assets, int Errors);
 public static class GameIndexer
 {
     /// <summary>Bump when extractors change so existing databases get rebuilt.</summary>
-    public const int Version = 8;
+    public const int Version = 9;
 
     public const string FingerprintKey = "fingerprint";
 
@@ -42,6 +42,7 @@ public static class GameIndexer
         progress?.Report(new IndexProgress("Loading game text"));
         var text = GameText.Load(archive);
         var overlays = DlcOverlays.Find(archive);
+        var permanent = PermanentTypes.Find(archive);
 
         extractors ??= ExtractorSet.All;
         var work = archive.Files
@@ -59,8 +60,14 @@ public static class GameIndexer
             try
             {
                 var overlay = overlays.Contains(w.Entry.Path);
+                var scriptable = permanent.Contains(w.Entry.Path);
                 foreach (var raw in w.Extractor!.Extract(w.Entry, text))
-                    raws.Add(overlay ? raw with { Overlay = true } : raw);
+                {
+                    var r = overlay ? raw with { Overlay = true } : raw;
+                    if (scriptable && r.Kind == AssetKind.Prop)
+                        r = r with { Tags = [.. r.Tags, ArchetypeExtractor.ScriptableTag] };
+                    raws.Add(r);
+                }
             }
             catch (Exception e)
             {
