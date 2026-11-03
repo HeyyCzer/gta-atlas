@@ -29,6 +29,8 @@ internal sealed class MainForm : Form
     {
         Segments = [new Segment(Glyph.Grid, null, "Grid (Ctrl+L)"), new Segment(Glyph.List, null, "List (Ctrl+L)")],
     };
+    private readonly PillButton _generate = new() { Icon = Glyph.Photo, Text = "Generate thumbnails" };
+    private readonly ToolTip _toolTip = new();
     private readonly SearchBox _search = new() { Placeholder = "Search by name, display name, tag or hash" };
     private readonly Dropdown _dlc = new() { Text = "DLC" };
     private readonly Dropdown _gender = new() { Text = "Gender" };
@@ -43,6 +45,7 @@ internal sealed class MainForm : Form
     private Dictionary<Category, int> _taggedCounts = [];
     private int _generation;
     private GameAssets? _assets;
+    private readonly Thumbnails _thumbnails;
 
     public MainForm(AppPaths paths, AtlasSettings settings, AtlasDb db)
     {
@@ -50,6 +53,8 @@ internal sealed class MainForm : Form
         _settings = settings;
         _db = db;
         _queries = new AssetQueries(db);
+        _thumbnails = new Thumbnails(new ThumbnailStore(paths.Thumbnails));
+        _grid.Thumbnails = _thumbnails;
 
         Text = "GTA Atlas";
         Icon = AppIcon.Get();
@@ -77,7 +82,10 @@ internal sealed class MainForm : Form
             new PickerItem(Gender.Male, "Male"),
             new PickerItem(Gender.Female, "Female"),
         ];
-        _top.Controls.AddRange([_title, _scope, _view, _search, _dlc, _gender, _chips]);
+        _generate.BackColor = Theme.Back;
+        _generate.Visible = false;
+        _toolTip.SetToolTip(_generate, "Render a thumbnail for every prop and vehicle in this list that has none yet");
+        _top.Controls.AddRange([_title, _generate, _scope, _view, _search, _dlc, _gender, _chips]);
         _top.Layout += (_, _) => LayoutTop();
 
         var content = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Back };
@@ -99,7 +107,10 @@ internal sealed class MainForm : Form
 
         _view.Location = new Point(w - pad - _view.Width, y + Px(4));
         _scope.Location = new Point(_view.Left - Px(10) - _scope.Width, y + Px(4));
-        _title.SetBounds(pad, y, Math.Max(0, (_scope.Visible ? _scope.Left : _view.Left) - pad * 2), Px(48));
+        _generate.Height = _scope.Height;
+        _generate.Location = new Point(_scope.Left - Px(10) - _generate.Width, y + Px(4));
+        var titleRight = _generate.Visible ? _generate.Left : _scope.Visible ? _scope.Left : _view.Left;
+        _title.SetBounds(pad, y, Math.Max(0, titleRight - pad * 2), Px(48));
         y += Px(62);
 
         if (_search.Visible)
@@ -164,6 +175,7 @@ internal sealed class MainForm : Form
             RunSearchNow();
         };
 
+        _generate.Click += (_, _) => ToggleGenerate();
         _grid.ItemActivated += (_, _) => OpenDetail();
         _grid.CopyRequested += (_, item) => Copy(AssetText.CopyText(item));
         _dlcTable.DlcActivated += (_, d) => OpenDlc(d);
@@ -206,6 +218,8 @@ internal sealed class MainForm : Form
             }
             await _assets.Ready;
             _nav.SetLoading(null);
+            _thumbnails.AttachAssets(_assets);
+            UpdateGenerateButton();
         }
         catch (Exception e)
         {
@@ -219,6 +233,7 @@ internal sealed class MainForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        _thumbnails.Dispose(); // uses the game cache: before it
         _assets?.Dispose();
         base.OnFormClosed(e);
     }
@@ -290,6 +305,7 @@ internal sealed class MainForm : Form
         _search.Visible = _dlc.Visible = _scope.Visible = _view.Visible = !category.IsDlcList;
         _gender.Visible = category.HasGender;
         _gender.Select(_state.Gender);
+        UpdateGenerateButton();
         _scope.Selected = 0;
         _grid.EmptyText = "No results";
         LoadChips();
@@ -369,11 +385,64 @@ internal sealed class MainForm : Form
         var favoritesChanged = false;
         using var form = new DetailForm(_queries, _assets, _grid.ItemAt, _grid.Count, _grid.SelectedIndex);
         form.FavoritesChanged += (_, _) => favoritesChanged = true;
-        form.ShowDialog(this);
+        _thumbnails.Paused = true; // the viewport gets the file cache and GPU to itself
+        try
+        {
+            form.ShowDialog(this);
+        }
+        finally
+        {
+            _thumbnails.Paused = false;
+        }
         _grid.SelectedIndex = form.Index;
         if (favoritesChanged)
             AfterFavoritesChanged();
         _grid.Focus();
+    }
+
+    /// <summary>"Generate thumbnails" shows where the list can hold props or vehicles, once the renderer is up.</summary>
+    private void UpdateGenerateButton()
+    {
+        var kind = _state.Category.Kind;
+        var visible = _thumbnails.CanRender && !_state.Category.IsDlcList && (kind is null || ThumbnailStore.Supports(kind));
+        if (visible == _generate.Visible)
+            return;
+        _generate.Visible = visible;
+        _top.PerformLayout();
+    }
+
+    /// <summary>Starts rendering every missing thumbnail of the current result (props and vehicles), or stops it.</summary>
+    private async void ToggleGenerate()
+    {
+        if (_thumbnails.Generating is not null)
+        {
+            _thumbnails.StopGenerating();
+            return;
+        }
+
+        var query = _state.ToQuery() with { Offset = 0, Limit = int.MaxValue };
+        var kinds = query.Kind is { } k ? [k] : new[] { AssetKind.Prop, AssetKind.Vehicle };
+        var keys = await Task.Run(() => kinds.Where(ThumbnailStore.Supports)
+            .SelectMany(kind => _queries.Search(query with { Kind = kind }).Items)
+            .Select(ThumbKey.Of)
+            .ToList());
+        if (keys.Count == 0)
+            return;
+        _thumbnails.GenerateAll(keys);
+        _generate.Icon = Glyph.Stop;
+        _generate.Text = "Stop thumbnails";
+        _top.PerformLayout();
+        while (_thumbnails.Generating is { } p && !IsDisposed)
+        {
+            _nav.SetLoading("Generating thumbnails", $"{p.Done:N0} of {p.Total:N0}", (double)p.Done / p.Total);
+            await Task.Delay(250);
+        }
+        if (IsDisposed)
+            return;
+        _nav.SetLoading(null);
+        _generate.Icon = Glyph.Photo;
+        _generate.Text = "Generate thumbnails";
+        _top.PerformLayout();
     }
 
     private void ToggleFavorite(AssetSummary item)

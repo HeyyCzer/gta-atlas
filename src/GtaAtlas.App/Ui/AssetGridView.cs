@@ -59,8 +59,32 @@ internal sealed class AssetGridView : Control
             _smooth.Dispose();
             ClearRowCache();
             ClearTiles();
+            ClearScaled();
         }
         base.Dispose(disposing);
+    }
+
+    private Thumbnails? _thumbnails;
+
+    /// <summary>Source of card images; cards show the kind placeholder until theirs is ready.</summary>
+    public Thumbnails? Thumbnails
+    {
+        get => _thumbnails;
+        set
+        {
+            if (_thumbnails is not null)
+                _thumbnails.Updated -= OnThumbnailsUpdated;
+            _thumbnails = value;
+            if (value is not null)
+                value.Updated += OnThumbnailsUpdated;
+        }
+    }
+
+    /// <summary>Repaints rows (cached rows still show placeholders); painting asks again for what's missing.</summary>
+    private void OnThumbnailsUpdated(object? sender, EventArgs e)
+    {
+        ClearRowCache();
+        Invalidate();
     }
 
     public event EventHandler? SelectionChanged;
@@ -315,10 +339,16 @@ internal sealed class AssetGridView : Control
         Theme.FillRounded(g, r, radius, hover || selected ? Theme.Raised : Theme.Surface,
             selected ? Theme.Accent : hover ? Theme.BorderStrong : Theme.Border);
 
-        // Image area: placeholder tile until thumbnails exist (Phase 4). Same for every card of a kind: cached.
+        // Image area: kind tile (same for every card of a kind: cached), with the thumbnail on top when there is one.
         var image = new Rectangle(r.X + Px(6), r.Y + Px(6), r.Width - Px(12), ImageHeight - Px(6));
         var cardBack = hover || selected ? Theme.Raised : Theme.Surface;
-        g.DrawImageUnscaled(Tile(item.Kind, image.Size, cardBack), image.Location);
+        var thumbnail = _thumbnails?.Get(item);
+        g.DrawImageUnscaled(Tile(item.Kind, image.Size, cardBack, glyph: thumbnail is null), image.Location);
+        if (thumbnail is not null)
+        {
+            g.DrawImageUnscaled(Scaled(thumbnail, image.Size), image.Location);
+            PaintKindLabel(g, item.Kind, image);
+        }
 
         if (hover || selected)
             PaintCopy(g, CopyBounds(r), index, Color.FromArgb(0xD0, Theme.Back));
@@ -335,11 +365,11 @@ internal sealed class AssetGridView : Control
         PaintBadge(g, item.Dlc, x, y, w);
     }
 
-    private readonly Dictionary<(string Kind, Size Size, Color Back), Bitmap> _tiles = [];
+    private readonly Dictionary<(string Kind, Size Size, Color Back, bool Glyph), Bitmap> _tiles = [];
 
-    private Bitmap Tile(string kind, Size size, Color cardBack)
+    private Bitmap Tile(string kind, Size size, Color cardBack, bool glyph = true)
     {
-        if (_tiles.TryGetValue((kind, size, cardBack), out var tile))
+        if (_tiles.TryGetValue((kind, size, cardBack, glyph), out var tile))
             return tile;
 
         tile = new Bitmap(size.Width, size.Height, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
@@ -355,18 +385,73 @@ internal sealed class AssetGridView : Control
             g.FillPath(back, path);
             g.FillPath(brush, path);
         }
-        Theme.DrawIcon(g, KindGlyph(kind), r, Color.FromArgb(0xB0, kindColor), Theme.IconLarge);
-
-        var label = AssetText.KindTitle(kind).ToUpperInvariant();
-        var labelSize = TextRenderer.MeasureText(label, Theme.Caption);
-        var labelRect = new Rectangle(Px(8), r.Bottom - Px(26), labelSize.Width + Px(6), Px(18));
-        Theme.FillRounded(g, labelRect, Px(4), Color.FromArgb(0xC0, Theme.Back));
-        TextRenderer.DrawText(g, label, Theme.Caption, labelRect, kindColor, Theme.Centered);
+        if (glyph)
+        {
+            Theme.DrawIcon(g, KindGlyph(kind), r, Color.FromArgb(0xB0, kindColor), Theme.IconLarge);
+            PaintKindLabel(g, kind, r);
+        }
 
         if (_tiles.Count > 64)
             ClearTiles();
-        _tiles[(kind, size, cardBack)] = tile;
+        _tiles[(kind, size, cardBack, glyph)] = tile;
         return tile;
+    }
+
+    private void PaintKindLabel(Graphics g, string kind, Rectangle image)
+    {
+        var label = AssetText.KindTitle(kind).ToUpperInvariant();
+        var labelSize = TextRenderer.MeasureText(label, Theme.Caption);
+        var labelRect = new Rectangle(image.X + Px(8), image.Bottom - Px(26), labelSize.Width + Px(6), Px(18));
+        Theme.FillRounded(g, labelRect, Px(4), Color.FromArgb(0xC0, Theme.Back));
+        TextRenderer.DrawText(g, label, Theme.Caption, labelRect, Theme.KindColor(kind), Theme.Centered);
+    }
+
+    private const int MaxScaled = 192;
+    private readonly Dictionary<(Bitmap Source, Size Size), LinkedListNode<(Bitmap Source, Size Size, Bitmap Scaled)>> _scaled = [];
+    private readonly LinkedList<(Bitmap Source, Size Size, Bitmap Scaled)> _scaledOrder = new();
+
+    /// <summary>
+    /// The thumbnail fitted (aspect kept, centred) into the image area, scaled once with high quality and cached:
+    /// rows are painted while scrolling, where per-frame bicubic scaling would drop frames.
+    /// </summary>
+    private Bitmap Scaled(Bitmap source, Size size)
+    {
+        if (_scaled.TryGetValue((source, size), out var node))
+        {
+            _scaledOrder.Remove(node);
+            _scaledOrder.AddFirst(node);
+            return node.Value.Scaled;
+        }
+
+        var inner = Rectangle.Inflate(new Rectangle(Point.Empty, size), -Px(6), -Px(4));
+        var scale = Math.Min((float)inner.Width / source.Width, (float)inner.Height / source.Height);
+        var w = (int)(source.Width * scale);
+        var h = (int)(source.Height * scale);
+        var scaled = new Bitmap(size.Width, size.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        using (var g = Graphics.FromImage(scaled))
+        {
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.DrawImage(source, new Rectangle(inner.X + (inner.Width - w) / 2, inner.Y + (inner.Height - h) / 2, w, h));
+        }
+
+        _scaled[(source, size)] = _scaledOrder.AddFirst((source, size, scaled));
+        while (_scaledOrder.Count > MaxScaled)
+        {
+            var last = _scaledOrder.Last!.Value;
+            _scaledOrder.RemoveLast();
+            _scaled.Remove((last.Source, last.Size));
+            last.Scaled.Dispose();
+        }
+        return scaled;
+    }
+
+    private void ClearScaled()
+    {
+        foreach (var (_, _, scaled) in _scaledOrder)
+            scaled.Dispose();
+        _scaled.Clear();
+        _scaledOrder.Clear();
     }
 
     private void ClearTiles()

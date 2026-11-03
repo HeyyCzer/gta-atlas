@@ -140,4 +140,6 @@ internal static class Glyph
     public const string Apps = "\uE71D";
     public const string Puzzle = "\uEA86";
     public const string Cube = "\uF158";
+    public const string Photo = "\uE91B";
+    public const string Stop = "\uE71A";
 }
