@@ -30,7 +30,7 @@ switch (command)
         Console.WriteLine("""
             atlas files <regex>              list game files whose path matches
             atlas index [--force]            build the asset index
-            atlas search <text> [--kind k]   query the index
+            atlas search <text> [--kind k] [--repeat n]  query the index
             atlas stats                      counts per kind and DLC
             """);
         break;
@@ -82,10 +82,22 @@ void Search(List<string> a)
         kind = a[kindAt + 1];
         a.RemoveRange(kindAt, 2);
     }
+    var repeatAt = a.IndexOf("--repeat");
+    var repeat = 1;
+    if (repeatAt >= 0 && repeatAt + 1 < a.Count)
+    {
+        repeat = int.Parse(a[repeatAt + 1]);
+        a.RemoveRange(repeatAt, 2);
+    }
     var queries = new AssetQueries(AtlasDb.Open(paths.Database));
-    var sw = Stopwatch.StartNew();
-    var result = queries.Search(new SearchQuery { Text = string.Join(' ', a), Kind = kind, Limit = 30 });
-    Console.WriteLine($"{result.Total} results ({sw.ElapsedMilliseconds} ms)");
+    var query = new SearchQuery { Text = string.Join(' ', a), Kind = kind, Limit = 30 };
+    SearchResult result = null!;
+    for (var i = 0; i < repeat; i++)
+    {
+        var sw = Stopwatch.StartNew();
+        result = queries.Search(query);
+        Console.WriteLine($"{result.Total} results ({sw.ElapsedMilliseconds} ms)");
+    }
     foreach (var r in result.Items)
         Console.WriteLine($"{r.Kind,-10} {r.Name,-40} {r.DisplayName,-30} {r.Dlc,-16} {HashText.ToHex(r.Hash)}");
 }

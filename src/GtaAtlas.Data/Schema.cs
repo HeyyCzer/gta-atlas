@@ -71,6 +71,8 @@ internal static class Schema
 
         CREATE UNIQUE INDEX IF NOT EXISTS ux_asset_kind_key ON asset(kind, key);
         CREATE INDEX IF NOT EXISTS ix_asset_kind_dlc ON asset(kind, dlc_id);
+        CREATE INDEX IF NOT EXISTS ix_asset_kind_name ON asset(kind, name);
+        CREATE INDEX IF NOT EXISTS ix_asset_name ON asset(name);
         CREATE INDEX IF NOT EXISTS ix_asset_hash ON asset(hash);
         CREATE INDEX IF NOT EXISTS ix_asset_parent ON asset(parent_id);
         CREATE UNIQUE INDEX IF NOT EXISTS ux_source_file_path ON source_file(path);
@@ -83,6 +85,8 @@ internal static class Schema
         """
         DROP INDEX IF EXISTS ux_asset_kind_key;
         DROP INDEX IF EXISTS ix_asset_kind_dlc;
+        DROP INDEX IF EXISTS ix_asset_kind_name;
+        DROP INDEX IF EXISTS ix_asset_name;
         DROP INDEX IF EXISTS ix_asset_hash;
         DROP INDEX IF EXISTS ix_asset_parent;
         DROP INDEX IF EXISTS ux_source_file_path;

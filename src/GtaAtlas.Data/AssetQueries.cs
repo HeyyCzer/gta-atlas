@@ -20,7 +20,7 @@ public sealed class AssetQueries(AtlasDb db)
         }
         if (q.Dlc is not null)
         {
-            where.Append(" AND d.name = @dlc");
+            where.Append(" AND a.dlc_id = (SELECT id FROM dlc WHERE name = @dlc)");
             p.Add("dlc", q.Dlc);
         }
         if (q.ParentId is not null)
@@ -38,7 +38,7 @@ public sealed class AssetQueries(AtlasDb db)
         if (!string.IsNullOrEmpty(text))
             where.Append(" AND (").Append(TextCondition(text, p)).Append(')');
 
-        var from = $"FROM asset a JOIN dlc d ON d.id = a.dlc_id WHERE {where}";
+        var from = $"FROM asset a WHERE {where}";
         var order = string.IsNullOrEmpty(text)
             ? "ORDER BY a.name"
             : "ORDER BY (a.name = @exact COLLATE NOCASE) DESC, (a.name LIKE @prefix) DESC, length(a.name), a.name";
@@ -48,8 +48,10 @@ public sealed class AssetQueries(AtlasDb db)
         p.Add("offset", q.Offset);
 
         using var c = db.Connect();
+        // Count and page without the dlc join so plain filters stay index-only; DLC names are joined onto the page.
         var total = c.ExecuteScalar<int>($"SELECT COUNT(*) {from}", p);
-        var rows = c.Query<SummaryRow>($"SELECT {SummaryColumns} {from} {order} LIMIT @limit OFFSET @offset", p);
+        var rows = c.Query<SummaryRow>(
+            $"SELECT {SummaryColumns} FROM (SELECT a.* {from} {order} LIMIT @limit OFFSET @offset) a JOIN dlc d ON d.id = a.dlc_id {order}", p);
         return new SearchResult(rows.Select(r => r.ToSummary()).ToList(), total);
     }
 

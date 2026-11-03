@@ -15,7 +15,7 @@ public sealed record IndexResult(bool Skipped, int Assets, int Errors);
 public static class GameIndexer
 {
     /// <summary>Bump when extractors change so existing databases get rebuilt.</summary>
-    public const int Version = 6;
+    public const int Version = 7;
 
     public const string FingerprintKey = "fingerprint";
 
