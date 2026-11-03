@@ -146,21 +146,25 @@ internal sealed class DetailView : ThemedControl
     {
         var g = e.Graphics;
         g.Clear(BackColor);
-        g.TranslateTransform(0, -_smooth.Value);
+        // Offsets are applied per rectangle: TextRenderer ignores Graphics transforms, so a
+        // TranslateTransform would scroll the GDI+ fills but leave the text behind.
+        var scroll = _smooth.Value;
+        Rectangle View(Rectangle r) => r with { Y = r.Y - scroll };
 
         foreach (var block in _blocks)
         {
             switch (block)
             {
                 case HeaderBlock h:
-                    TextRenderer.DrawText(g, h.Text, Theme.Caption, h.Bounds, Theme.Faint, Theme.Line);
+                    TextRenderer.DrawText(g, h.Text, Theme.Caption, View(h.Bounds), Theme.Faint, Theme.Line);
                     break;
                 case RowBlock r:
-                    PaintRow(g, r);
+                    PaintRow(g, r with { Bounds = View(r.Bounds) }, r == _hover);
                     break;
                 case ChipsBlock c:
-                    foreach (var (text, bounds) in c.Chips)
+                    foreach (var (text, content) in c.Chips)
                     {
+                        var bounds = View(content);
                         Theme.FillRounded(g, bounds, bounds.Height / 2, Theme.Raised, Theme.Border);
                         TextRenderer.DrawText(g, text, Theme.Small, bounds, Theme.Text, Theme.Centered);
                     }
@@ -168,7 +172,6 @@ internal sealed class DetailView : ThemedControl
             }
         }
 
-        g.ResetTransform();
         if (MaxScroll > 0)
         {
             var h = Math.Max(Px(30), Height * Height / _contentHeight);
@@ -177,9 +180,8 @@ internal sealed class DetailView : ThemedControl
         }
     }
 
-    private void PaintRow(Graphics g, RowBlock r)
+    private void PaintRow(Graphics g, RowBlock r, bool hover)
     {
-        var hover = r == _hover;
         if (hover)
         {
             Theme.FillRounded(g, Rectangle.Inflate(r.Bounds, Px(10), 0), Px(8), Theme.Hover);
