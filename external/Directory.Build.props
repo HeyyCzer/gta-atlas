@@ -1,0 +1,2 @@
+<!-- Stops MSBuild from applying the repo-root Directory.Build.props to upstream projects. -->
+<Project />

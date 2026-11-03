@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- Upstream CodeWalker sources are compiled as-is: keep their language settings. -->
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <NoWarn>$(NoWarn);CS0168;CS0219;CS0414;CS0649;CS0169;CS0162;CS8981;CA1416;WFO1000</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <CodeWalkerDir>..\..\external\CodeWalker\</CodeWalkerDir>
+  </PropertyGroup>
+
+  <!-- Renderer sources linked from upstream (see ROADMAP.md). Do not edit them; patch via Stubs.cs. -->
+  <ItemGroup>
+    <Compile Include="$(CodeWalkerDir)CodeWalker\Rendering\**\*.cs" Link="CodeWalker\Rendering\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="$(CodeWalkerDir)CodeWalker\Utils\MapUtils.cs" Link="CodeWalker\Utils\MapUtils.cs" />
+    <Compile Include="$(CodeWalkerDir)CodeWalker\Utils\TextureLoader.cs" Link="CodeWalker\Utils\TextureLoader.cs" />
+    <Compile Include="$(CodeWalkerDir)CodeWalker\World\Widget.cs" Link="CodeWalker\World\Widget.cs" />
+    <Compile Include="$(CodeWalkerDir)CodeWalker\GameFiles\TextureFormats.cs" Link="CodeWalker\GameFiles\TextureFormats.cs" />
+    <Compile Include="$(CodeWalkerDir)CodeWalker\Properties\Settings.Designer.cs" Link="CodeWalker\Properties\Settings.Designer.cs" />
+  </ItemGroup>
+
+  <!-- CodeWalker loads compiled shaders from <app dir>\Shaders\*.cso. -->
+  <ItemGroup>
+    <None Include="$(CodeWalkerDir)Shaders\*.cso" Link="Shaders\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SharpDX" Version="4.2.0" />
+    <PackageReference Include="SharpDX.D3DCompiler" Version="4.2.0" />
+    <PackageReference Include="SharpDX.Direct2D1" Version="4.2.0" />
+    <PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
+    <PackageReference Include="SharpDX.Mathematics" Version="4.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GtaAtlas.Core\GtaAtlas.Core.csproj" />
+  </ItemGroup>
+
+</Project>
