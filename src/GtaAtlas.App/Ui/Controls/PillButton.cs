@@ -27,6 +27,17 @@ internal class PillButton : ThemedControl
 
     public bool Primary { get; set; }
 
+    /// <summary>On state of a toggle: accent border over the hover fill.</summary>
+    public bool Checked
+    {
+        get;
+        set
+        {
+            field = value;
+            Invalidate();
+        }
+    }
+
     /// <summary>Text drawn after the label in muted color (e.g. the current value of a dropdown).</summary>
     public virtual string? Trailing => null;
 
@@ -67,8 +78,8 @@ internal class PillButton : ThemedControl
         var r = new Rectangle(0, 0, Width - 1, Height - 1);
         var fill = Primary
             ? Hovered ? ControlPaint.Light(Theme.Accent, 0.1f) : Theme.Accent
-            : _pressed ? Theme.Hover : Hovered ? Color.FromArgb(0x23, 0x25, 0x2B) : Theme.Raised;
-        Theme.FillRounded(g, r, Px(10), fill, Primary ? null : Hovered ? Theme.BorderStrong : Theme.Border);
+            : _pressed || Checked ? Theme.Hover : Hovered ? Color.FromArgb(0x23, 0x25, 0x2B) : Theme.Raised;
+        Theme.FillRounded(g, r, Px(10), fill, Primary ? null : Checked ? Theme.Accent : Hovered ? Theme.BorderStrong : Theme.Border);
 
         var fore = Primary ? Theme.Back : Enabled ? Theme.Text : Theme.Faint;
         var x = Px(10);

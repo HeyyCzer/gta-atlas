@@ -151,6 +151,8 @@ internal sealed class DetailForm : Form
             case Keys.Control | Keys.D:
                 ToggleFavorite();
                 return true;
+            case Keys.W or Keys.B or Keys.S or Keys.L when _preview.HandleKey(keyData):
+                return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);
     }
@@ -201,12 +203,22 @@ internal sealed class DetailForm : Form
     }
 
     /// <summary>
-    /// Left area: 3D viewport for kinds it can show (placeholder with status otherwise), position and prev/next.
-    /// The viewport is a native D3D window that nothing can be painted over, so the arrows live in the footer.
+    /// Left area: 3D viewport for kinds it can show (placeholder with status otherwise), view toolbar, position and
+    /// prev/next. The viewport is a native D3D window that nothing can be painted over, so controls sit above and below it.
     /// </summary>
     private sealed class PreviewPane : ThemedControl
     {
+        private static readonly string[] LodNames = ["High", "Medium", "Low", "Very low"];
+
         private readonly GameAssets? _assets;
+        private readonly Segmented _lodPick = new();
+        private readonly PillButton _wireframe = new() { Text = "Wireframe" };
+        private readonly PillButton _bounds = new() { Text = "Bounds" };
+        private readonly PillButton _skeleton = new() { Text = "Skeleton" };
+        private readonly ToolTip _toolTip = new();
+        private IReadOnlyList<DetailLevel> _lods = [DetailLevel.High];
+        private DetailLevel _lod; // requested; kept while browsing models that lack it
+        private bool _syncingLods;
         private ModelViewport? _viewport;
         private AssetSummary? _item;
         private int _index;
@@ -217,6 +229,100 @@ internal sealed class DetailForm : Form
         public PreviewPane(GameAssets? assets)
         {
             _assets = assets;
+            foreach (var c in Toolbar)
+            {
+                c.BackColor = Theme.Back;
+                c.Height = Px(34);
+                c.Visible = false;
+                Controls.Add(c);
+            }
+            _toolTip.SetToolTip(_lodPick, "Level of detail (L)");
+            _toolTip.SetToolTip(_wireframe, "Wireframe (W)");
+            _toolTip.SetToolTip(_bounds, "Bounding box (B)");
+            _toolTip.SetToolTip(_skeleton, "Skeleton bones (S)");
+            _lodPick.SelectedChanged += (_, _) =>
+            {
+                if (!_syncingLods && _lodPick.Selected < _lods.Count)
+                    SetLod(_lods[_lodPick.Selected]);
+            };
+            _wireframe.Click += (_, _) => Toggle(_wireframe);
+            _bounds.Click += (_, _) => Toggle(_bounds);
+            _skeleton.Click += (_, _) => Toggle(_skeleton);
+        }
+
+        private Control[] Toolbar => [_lodPick, _wireframe, _bounds, _skeleton];
+
+        /// <summary>W/B/S toggle view options, L cycles the level of detail. False when no model is shown.</summary>
+        public bool HandleKey(Keys key)
+        {
+            if (_viewport is not { Visible: true })
+                return false;
+            switch (key)
+            {
+                case Keys.W:
+                    Toggle(_wireframe);
+                    break;
+                case Keys.B:
+                    Toggle(_bounds);
+                    break;
+                case Keys.S:
+                    Toggle(_skeleton);
+                    break;
+                case Keys.L:
+                    var shown = _lods.ToList().IndexOf(ModelLods.Effective(_lods, _lod));
+                    SetLod(_lods[(shown + 1) % _lods.Count]);
+                    break;
+            }
+            return true;
+        }
+
+        private void Toggle(PillButton button)
+        {
+            button.Checked = !button.Checked;
+            ApplyViewOptions();
+        }
+
+        private void SetLod(DetailLevel lod)
+        {
+            _lod = lod;
+            ApplyViewOptions();
+            SyncLodPick();
+        }
+
+        private void ApplyViewOptions()
+        {
+            if (_viewport is null)
+                return;
+            _viewport.Lod = _lod;
+            _viewport.Wireframe = _wireframe.Checked;
+            _viewport.ShowBounds = _bounds.Checked;
+            _viewport.ShowSkeleton = _skeleton.Checked;
+        }
+
+        /// <summary>Lists the levels the current model has, with the one actually drawn selected.</summary>
+        private void SyncLodPick()
+        {
+            _syncingLods = true;
+            _lodPick.Segments = _lods.Select(l => new Segment(null, LodNames[(int)l])).ToList();
+            _lodPick.Selected = _lods.ToList().IndexOf(ModelLods.Effective(_lods, _lod));
+            _syncingLods = false;
+            LayoutToolbar();
+        }
+
+        private void ShowToolbar(bool visible)
+        {
+            foreach (var c in Toolbar)
+                c.Visible = visible;
+        }
+
+        private void LayoutToolbar()
+        {
+            var x = Stage.X;
+            foreach (var c in Toolbar)
+            {
+                c.Location = new Point(x, Px(24));
+                x += c.Width + Px(c == _lodPick ? 16 : 8);
+            }
         }
 
         public event EventHandler<int>? Navigate;
@@ -241,6 +347,7 @@ internal sealed class DetailForm : Form
                     _viewport.Clear();
                     _viewport.Visible = false;
                 }
+                ShowToolbar(false);
                 return;
             }
 
@@ -251,9 +358,13 @@ internal sealed class DetailForm : Form
                 {
                     _message = $"Preview unavailable: {error}";
                     _viewport.Visible = error is null;
+                    _lods = _viewport.AvailableLods;
+                    SyncLodPick();
+                    ShowToolbar(error is null);
                     Invalidate();
                 };
                 Controls.Add(_viewport);
+                ApplyViewOptions();
                 LayoutViewport();
             }
             _message = _assets.Ready.IsCompleted ? "Loading model…" : "Loading game files…";
@@ -275,7 +386,7 @@ internal sealed class DetailForm : Form
             }
         }
 
-        private Rectangle Stage => new(Px(24), Px(24), Width - Px(48), Height - Px(80));
+        private Rectangle Stage => new(Px(24), Px(70), Width - Px(48), Height - Px(126));
         private Rectangle Arrow(int dir) => new(Stage.X + (dir < 0 ? 0 : Px(40)), Stage.Bottom + Px(12), Px(34), Px(30));
 
         private void LayoutViewport()
@@ -288,6 +399,7 @@ internal sealed class DetailForm : Form
         {
             base.OnLayout(e);
             LayoutViewport();
+            LayoutToolbar();
         }
 
         protected override void Dispose(bool disposing)

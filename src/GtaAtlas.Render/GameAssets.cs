@@ -50,26 +50,48 @@ namespace GtaAtlas.Render
         public static GameAssets Start(GameInstall install, Action<string> error = null) => new(install, error);
 
         /// <summary>
-        /// Loads a vehicle model (<c>name_hi.yft</c>, falling back to <c>name.yft</c>), blocking until the content
-        /// thread has read it. Returns null if the game has no such model. Call off the UI thread, after <see cref="Ready"/>.
+        /// Loads a vehicle's models: <c>name_hi.yft</c> (high detail only) and <c>name.yft</c> (all LODs, lower top level),
+        /// blocking until the content thread has read them. Null if the game has neither.
+        /// Call off the UI thread, after <see cref="Ready"/>.
         /// </summary>
-        public FragType LoadVehicle(string name, int timeoutMs = 10000)
+        public VehicleModels LoadVehicle(string name, int timeoutMs = 10000)
         {
             name = name.ToLowerInvariant();
-            foreach (var model in new[] { name + "_hi", name })
+            var hi = LoadFragment(name + "_hi", timeoutMs);
+            var lods = LoadFragment(name, timeoutMs);
+            return hi == null && lods == null ? null : new VehicleModels(hi, lods);
+        }
+
+        /// <summary>Loads <c>model.yft</c>; null if missing or without a drawable.</summary>
+        public FragType LoadFragment(string model, int timeoutMs = 10000)
+        {
+            var hash = JenkHash.GenHash(model.ToLowerInvariant());
+            if (Cache.GetYftEntry(hash) == null)
+                return null;
+            var yft = Wait(() => Cache.GetYft(hash), y => y is not { Loaded: false }, timeoutMs);
+            return yft?.Fragment?.Drawable != null ? yft.Fragment : null;
+        }
+
+        /// <summary>Loads an archetype's drawable (ydr or ydd entry), blocking like <see cref="LoadVehicle"/>; null if missing.</summary>
+        public DrawableBase LoadDrawable(Archetype archetype, int timeoutMs = 10000)
+        {
+            // No file to wait for (TryGetDrawable tries the ydd entry, then ydr, then yft).
+            if (archetype.DrawableDict == 0 && Cache.GetYdrEntry(archetype.Hash) == null && Cache.GetYftEntry(archetype.Hash) == null)
+                return null;
+            return Wait(() => Cache.TryGetDrawable(archetype), d => d != null, timeoutMs);
+        }
+
+        /// <summary>Polls <paramref name="get"/> until <paramref name="done"/>; re-requesting matters, as the cache drops requests not renewed within 0.5 s.</summary>
+        private static T Wait<T>(Func<T> get, Func<T, bool> done, int timeoutMs)
+        {
+            var deadline = Environment.TickCount64 + timeoutMs;
+            var value = get();
+            while (!done(value) && Environment.TickCount64 < deadline)
             {
-                var hash = JenkHash.GenHash(model);
-                var deadline = Environment.TickCount64 + timeoutMs;
-                var yft = Cache.GetYft(hash);
-                while (yft is { Loaded: false } && Environment.TickCount64 < deadline)
-                {
-                    Thread.Sleep(2);
-                    yft = Cache.GetYft(hash); // re-request: the cache drops requests not renewed within 0.5 s
-                }
-                if (yft?.Fragment?.Drawable != null)
-                    return yft.Fragment;
+                Thread.Sleep(2);
+                value = get();
             }
-            return null;
+            return value;
         }
 
         private void Pump()
@@ -93,4 +115,7 @@ namespace GtaAtlas.Render
             _pump.Join(1000);
         }
     }
+
+    /// <summary>A vehicle's <c>_hi</c> model and its regular, multi-LOD one; either may be missing.</summary>
+    public sealed record VehicleModels(FragType Hi, FragType Lods);
 }

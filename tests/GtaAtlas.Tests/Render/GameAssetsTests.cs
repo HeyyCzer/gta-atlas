@@ -23,26 +23,22 @@ public class GameAssetsTests(ITestOutputHelper output)
 
         var arch = assets.Cache.GetArchetype(JenkHash.GenHash("prop_bench_01a"));
         Assert.NotNull(arch);
-        var drawable = await Until(() => assets.Cache.TryGetDrawable(arch));
+        var drawable = await Task.Run(() => assets.LoadDrawable(arch), TestContext.Current.CancellationToken);
+        Assert.NotNull(drawable);
         Assert.True(drawable.BoundingSphereRadius > 0);
+        output.WriteLine($"prop_bench_01a LODs: {string.Join(", ", ModelLods.Available(drawable))}");
+        Assert.Contains(DetailLevel.High, ModelLods.Available(drawable));
 
         // DLC prop: archetypes of every DLC are loaded, not just base.
         Assert.NotNull(assets.Cache.GetArchetype(JenkHash.GenHash("h4_prop_x17_sub")));
 
         var adder = await Task.Run(() => assets.LoadVehicle("adder"), TestContext.Current.CancellationToken);
         Assert.NotNull(adder);
+        Assert.NotNull(adder.Hi);
+        Assert.NotNull(adder.Lods);
+        output.WriteLine($"adder_hi LODs: {string.Join(", ", ModelLods.Available(adder.Hi.Drawable))}; adder: {string.Join(", ", ModelLods.Available(adder.Lods.Drawable))}");
+        Assert.Equal([DetailLevel.High, DetailLevel.Medium, DetailLevel.Low, DetailLevel.VeryLow], ModelLods.Vehicle(adder.Hi.Drawable, adder.Lods.Drawable));
         Assert.Null(await Task.Run(() => assets.LoadVehicle("not_a_vehicle"), TestContext.Current.CancellationToken));
         output.WriteLine($"total {sw.ElapsedMilliseconds} ms");
-    }
-
-    private static async Task<T> Until<T>(Func<T?> get) where T : class
-    {
-        for (var i = 0; i < 500; i++)
-        {
-            if (get() is { } value)
-                return value;
-            await Task.Delay(10);
-        }
-        throw new TimeoutException();
     }
 }
