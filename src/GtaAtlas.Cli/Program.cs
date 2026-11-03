@@ -14,6 +14,9 @@ switch (command)
     case "files":
         Files(rest);
         break;
+    case "cat":
+        Cat(rest);
+        break;
     case "index":
         Index(rest.Contains("--force"));
         break;
@@ -41,6 +44,24 @@ void Files(List<string> a)
     var archive = GameArchive.Scan(OpenSession(), Console.Error.WriteLine);
     foreach (var e in archive.Files.Where(e => regex.IsMatch(e.Path)))
         Console.WriteLine($"{e.Path}  [{SourcePaths.DlcOf(e.Path)}]");
+}
+
+void Cat(List<string> a)
+{
+    var archive = GameArchive.Scan(OpenSession(), Console.Error.WriteLine);
+    var entry = archive.Files.FirstOrDefault(e => e.Path.Equals(a.FirstOrDefault(), StringComparison.OrdinalIgnoreCase));
+    if (entry is null)
+    {
+        Console.Error.WriteLine("File not found.");
+        return;
+    }
+    if (entry.NameLower.EndsWith(".ymt") || entry.NameLower.EndsWith(".ytyp") || entry.NameLower.EndsWith(".ymap"))
+    {
+        var data = entry.File.ExtractFile(entry);
+        Console.WriteLine(CodeWalker.GameFiles.MetaXml.GetXml(entry, data, out _));
+        return;
+    }
+    Console.WriteLine(GameArchive.ReadText(entry));
 }
 
 void Index(bool force)

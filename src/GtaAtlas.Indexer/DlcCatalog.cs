@@ -28,6 +28,9 @@ public static class DlcCatalog
             packs.Add((name, i, ReadSetup(archive.Manager, rpf, error)));
         }
 
+        // The game mounts packs by setup2 "order" (dlclist position breaks ties); clothing collection
+        // numbering confirms it. Patch packs carry low orders but mostly ship overlays, which
+        // AssetMerger does not treat as introducing content.
         var ordered = packs
             .OrderBy(p => p.Setup?.order ?? int.MaxValue)
             .ThenBy(p => p.ListIndex)
@@ -58,7 +61,10 @@ public static class DlcCatalog
     internal static List<string> ParseDlcList(XmlDocument doc)
     {
         var names = new List<string>();
-        foreach (var item in doc.SelectNodes("//Paths/Item")?.Cast<XmlNode>() ?? [])
+        // The real file mixes <Item> and <item>.
+        var items = (doc.SelectNodes("//Paths/*")?.Cast<XmlNode>() ?? [])
+            .Where(n => n.NodeType == XmlNodeType.Element && n.Name.Equals("item", StringComparison.OrdinalIgnoreCase));
+        foreach (var item in items)
         {
             var parts = item.InnerText.Trim().Replace('\\', '/').TrimEnd('/').Split('/');
             if (parts.Length > 0 && parts[^1].Length > 0)

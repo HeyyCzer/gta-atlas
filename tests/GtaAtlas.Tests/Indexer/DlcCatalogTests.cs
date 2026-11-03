@@ -16,11 +16,12 @@ public class DlcCatalogTests
                 <Item>platform:/dlcPacks/mpBeach/</Item>
                 <Item>platform:/dlcPacks/mpHeist4/</Item>
                 <Item>platform:\dlcPacks\patchday1ng</Item>
+                <item>dlcpacks:/mpxmas_604490/</item>
               </Paths>
             </SMandatoryPacksData>
             """);
 
-        Assert.Equal(["mpbeach", "mpheist4", "patchday1ng"], DlcCatalog.ParseDlcList(doc));
+        Assert.Equal(["mpbeach", "mpheist4", "patchday1ng", "mpxmas_604490"], DlcCatalog.ParseDlcList(doc));
     }
 
     [Fact]

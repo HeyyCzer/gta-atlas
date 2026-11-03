@@ -15,7 +15,7 @@ public sealed record IndexResult(bool Skipped, int Assets, int Errors);
 public static class GameIndexer
 {
     /// <summary>Bump when extractors change so existing databases get rebuilt.</summary>
-    public const int Version = 3;
+    public const int Version = 6;
 
     public const string FingerprintKey = "fingerprint";
 
@@ -41,6 +41,7 @@ public static class GameIndexer
 
         progress?.Report(new IndexProgress("Loading game text"));
         var text = GameText.Load(archive);
+        var overlays = DlcOverlays.Find(archive);
 
         extractors ??= ExtractorSet.All;
         var work = archive.Files
@@ -57,8 +58,9 @@ public static class GameIndexer
             var started = Stopwatch.GetTimestamp();
             try
             {
+                var overlay = overlays.Contains(w.Entry.Path);
                 foreach (var raw in w.Extractor!.Extract(w.Entry, text))
-                    raws.Add(raw);
+                    raws.Add(overlay ? raw with { Overlay = true } : raw);
             }
             catch (Exception e)
             {
@@ -73,9 +75,15 @@ public static class GameIndexer
 
         foreach (var (name, total) in ticks.OrderByDescending(t => t.Value))
             progress?.Report(new IndexProgress($"  {name}: {Stopwatch.GetElapsedTime(0, total).TotalSeconds:0}s cpu"));
+        progress?.Report(new IndexProgress("Clothing"));
+        foreach (var raw in Clothing.ClothingIndexer.Extract(archive, dlcs, overlays, session.Install.Gen9, text, Error))
+            raws.Add(raw);
+
         progress?.Report(new IndexProgress("Merging"));
         dlcs = DlcCatalog.WithUnlisted(dlcs, raws.Select(r => r.Dlc));
-        var assets = AssetMerger.Merge(raws, dlcs);
+        var assets = AssetMerger.Merge(raws, dlcs)
+            .Select(a => DlcNames.IsEnhancedOnly(a.Dlc) ? a with { Tags = [.. a.Tags, DlcNames.EnhancedTag] } : a)
+            .ToList();
 
         progress?.Report(new IndexProgress("Writing database", 0, assets.Count));
         IndexWriter.Rebuild(db, dlcs, assets, new Dictionary<string, string>

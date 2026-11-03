@@ -13,4 +13,7 @@ public sealed record RawAsset
     public object? Data { get; init; }
     public IReadOnlyCollection<string> Tags { get; init; } = [];
     public (string Kind, string Key)? Parent { get; init; }
+
+    /// <summary>Defined in an overlay RPF: overrides an existing definition, never introduces the asset.</summary>
+    public bool Overlay { get; init; }
 }

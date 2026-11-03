@@ -65,6 +65,23 @@ public class AssetMergerTests
     }
 
     [Fact]
+    public void Overlay_definitions_do_not_introduce_assets()
+    {
+        var a = Assert.Single(AssetMerger.Merge(
+            [Raw("mpbeach", "patch", new { v = 1 }) with { Overlay = true }, Raw("mpheist4", "real", new { v = 2 })], Dlcs));
+
+        Assert.Equal("mpheist4", a.Dlc);
+        Assert.Equal(2, a.Sources.Count);
+    }
+
+    [Fact]
+    public void Overlay_only_asset_falls_back_to_first_definition()
+    {
+        var a = Assert.Single(AssetMerger.Merge([Raw("mpheist4", "b") with { Overlay = true }, Raw("mpbeach", "a") with { Overlay = true }], Dlcs));
+        Assert.Equal("mpbeach", a.Dlc);
+    }
+
+    [Fact]
     public void Unknown_dlc_sorts_last()
     {
         var a = Assert.Single(AssetMerger.Merge([Raw("mystery", "m"), Raw(DlcNames.Update, "u")], Dlcs));

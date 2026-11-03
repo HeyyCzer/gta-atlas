@@ -15,7 +15,8 @@ public static class AssetMerger
 
     /// <summary>
     /// Groups definitions by (kind, key). The asset is attributed to the first DLC in load order
-    /// (the one that introduced it); its data comes from the last one (what the game actually uses).
+    /// that defines it outside an overlay (the one that introduced it); its data comes from the
+    /// last one (what the game actually uses).
     /// </summary>
     public static List<AssetInput> Merge(IEnumerable<RawAsset> raws, IReadOnlyList<DlcInput> dlcs)
     {
@@ -27,7 +28,7 @@ public static class AssetMerger
             .Select(g =>
             {
                 var sorted = g.OrderBy(OrderOf).ThenBy(r => r.Path, StringComparer.Ordinal).ToList();
-                var first = sorted[0];
+                var first = sorted.FirstOrDefault(r => !r.Overlay) ?? sorted[0];
                 var last = sorted[^1];
                 return new AssetInput
                 {

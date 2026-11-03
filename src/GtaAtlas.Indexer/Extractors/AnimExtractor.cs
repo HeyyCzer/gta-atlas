@@ -17,7 +17,7 @@ public sealed class AnimExtractor : Extractor
         var data = entry.File.ExtractFile(entry);
         var clips = data is null
             ? []
-            : YcdClipReader.Read((RpfResourceFileEntry)entry, data)
+            : ReadClips((RpfResourceFileEntry)entry, data)
                 .Select(c => (Name: ClipName(c), Duration: Round(c.Duration)))
                 .Where(c => c.Name.Length > 0)
                 .DistinctBy(c => c.Name)
@@ -38,6 +38,29 @@ public sealed class AnimExtractor : Extractor
                 Data = new { duration },
                 Tags = cutscene ? [CutsceneTag] : [],
             };
+        }
+    }
+
+    /// <summary>Fast reader; falls back to CodeWalker's full parser for the few files it cannot walk.</summary>
+    private static List<YcdClipReader.Clip> ReadClips(RpfResourceFileEntry entry, byte[] data)
+    {
+        try
+        {
+            return YcdClipReader.Read(entry, data);
+        }
+        catch (ArgumentException)
+        {
+            var ycd = new YcdFile();
+            ycd.Load(data, entry);
+            return (ycd.ClipMapEntries ?? [])
+                .Where(e => e?.Clip is not null)
+                .Select(e => new YcdClipReader.Clip(e.Hash.Hash, e.Clip.Name, e.Clip switch
+                {
+                    ClipAnimation a => a.Rate > 0 ? (a.EndTime - a.StartTime) / a.Rate : a.EndTime - a.StartTime,
+                    ClipAnimationList l => l.Duration,
+                    _ => 0f,
+                }))
+                .ToList();
         }
     }
 

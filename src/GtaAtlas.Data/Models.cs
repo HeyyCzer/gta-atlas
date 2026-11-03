@@ -19,6 +19,12 @@ public static class DlcNames
 
     /// <summary>Content patched directly in update.rpf outside any DLC folder.</summary>
     public const string Update = "update";
+
+    /// <summary>Tag for assets from Enhanced-only packs, which Legacy ships but does not use.</summary>
+    public const string EnhancedTag = "enhanced";
+
+    /// <summary>"Expanded &amp; Enhanced" packs: mpg9ec, mpsum2_g9ec, patchday27g9ecng...</summary>
+    public static bool IsEnhancedOnly(string dlc) => dlc.Contains("g9ec", StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed record DlcInput(string Name, int OrderIndex, string? DeviceName = null, int? SetupOrder = null, string? Timestamp = null);
