@@ -10,5 +10,7 @@
     <SelfContained>false</SelfContained>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Product>GTA Atlas</Product>
+    <!-- Release version: bump with scripts/bump-version.ps1, which tags it for .github/workflows/release.yml. -->
+    <Version>0.1.0</Version>
   </PropertyGroup>
 </Project>

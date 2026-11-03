@@ -1,0 +1,97 @@
+name: Release
+
+# Triggered by scripts/bump-version.ps1 pushing a vX.Y.Z tag.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # CodeWalker is a submodule compiled from source.
+          submodules: recursive
+          # Tags and full history, so the notes can list commits since the previous release.
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Check tag matches Version
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          [xml]$props = Get-Content Directory.Build.props
+          $projectVersion = $props.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if ($projectVersion -ne $version) {
+            throw "Tag ${{ github.ref_name }} does not match <Version>$projectVersion</Version> in Directory.Build.props"
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Build
+        run: dotnet build GtaAtlas.slnx -c Release
+
+      # Tests that need the game install skip themselves on the runner.
+      - name: Test
+        run: dotnet test --solution GtaAtlas.slnx -c Release --no-build
+
+      - name: Publish app
+        run: dotnet publish src/GtaAtlas.App/GtaAtlas.App.csproj -c Release -o out/app
+
+      - name: Publish CLI
+        run: dotnet publish src/GtaAtlas.Cli/GtaAtlas.Cli.csproj -c Release -o out/cli
+
+      - name: Package
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path out/app/* -DestinationPath dist/GtaAtlas.zip
+          Compress-Archive -Path out/cli/* -DestinationPath dist/GtaAtlas.Cli.zip
+
+      # Commits on the first-parent line since the previous tag (minus the bump commits),
+      # followed by GitHub's generated list of merged pull requests.
+      - name: Release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag='${{ github.ref_name }}'
+          prev=$(git describe --tags --abbrev=0 "$tag^" 2>/dev/null || true)
+          range=${prev:+$prev..}$tag
+
+          commits=$(git log "$range" --first-parent --no-merges --format='%h %H %s' \
+            | grep -Ev '^[0-9a-f]+ [0-9a-f]+ Release v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | while read -r short full subject; do
+                echo "- $subject ([\`$short\`](${{ github.server_url }}/${{ github.repository }}/commit/$full))"
+              done)
+
+          generated=$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
+            -f tag_name="$tag" -f target_commitish="$GITHUB_SHA" \
+            ${prev:+-f previous_tag_name="$prev"} --jq .body)
+
+          {
+            echo 'Download **`GtaAtlas.zip`**, extract it and run `GtaAtlas.exe`. Requires the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) and GTA V installed.'
+            echo '`GtaAtlas.Cli.zip` is the command-line indexer/search (`atlas.exe`).'
+            if [ -n "$commits" ]; then
+              echo
+              echo '## Commits'
+              echo "$commits"
+            fi
+            echo
+            echo "$generated"
+          } > dist/notes.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create '${{ github.ref_name }}' dist/GtaAtlas.zip dist/GtaAtlas.Cli.zip `
+            --title "v$env:VERSION" --notes-file dist/notes.md --verify-tag
