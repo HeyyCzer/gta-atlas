@@ -71,18 +71,19 @@ Cada fase termina em algo utilizável e verificável. Marque `[x]` ao concluir e
 **Pronto quando:** console/test lista entradas de `x64a.rpf`.
 
 ### Fase 1 — Indexer + DB
-- [ ] Schema + migrations em `GtaAtlas.Data`
-- [ ] Mapear DLCs: `update/update.rpf/common/data/dlclist.xml` → ordem; cada `dlc.rpf` → `setup2.xml` (nameHash, título)
-- [ ] Props: archetypes de todos os `.ytyp` (nome, hash, bbox, lodDist, flags, ytyp/dlc de origem)
-- [ ] Veículos: `vehicles.meta` + `carcols`/`carvariations` + nomes GXT2 (display name, fabricante, classe, modkit)
-- [ ] Peds: `peds.meta` (nome, tipo, grupo)
+- [x] Schema + migrations em `GtaAtlas.Data` (`PRAGMA user_version`; `asset` genérico + `data` JSON por kind, `asset_source` com todas as ocorrências, FTS5 trigram)
+- [x] Mapear DLCs: `dlclist.xml` + `setup2.xml` (order, deviceName, timeStamp). Packs fora da lista entram no fim
+- [x] Props: archetypes de todos os `.ytyp` (nome, hash, bbox, lodDist, flags, assetType, dicts)
+- [x] Veículos: `vehicles.meta` + nomes GXT2 (display name, fabricante, classe, tipo, modkits). `carcols`/`carvariations` → Fase 5
+- [x] Peds: `peds.meta`/`peds.ymt` (nome, pedType, clipsets)
 - [ ] Roupas: `.ymt` de shop/ped components (componente, drawable, textura, gênero, nome via GXT quando houver)
 - [ ] Animações: `.ycd` → dicionários e clips (nome, duração)
-- [ ] MLOs: archetypes `CMloArchetypeDef` (rooms, portals, entity sets)
+- [x] MLOs: archetypes `CMloArchetypeDef` (rooms, portals, entity sets)
 - [ ] YMAPs / IPLs: lista de `.ymap`, agrupamento em IPLs (por nome/`_manifest.ymf`), centro/extents
-- [ ] Hashes: decimal, int32, hex sempre gravados
-- [ ] Reindex incremental por `rpf_file(size, mtime)`; progress reporting
-- [ ] Tags automáticas (fabricante, classe, tipo, dlc, gênero etc.)
+- [x] Hashes: unsigned no DB; busca aceita decimal, int32 e hex (`HashText`)
+- [x] Reindex: fingerprint (SHA256 de path/size/mtime de todos os RPFs + `GameIndexer.Version`) → pula se igual. Rebuild sempre total (~30s), mais simples e correto que incremental por arquivo
+- [x] Tags automáticas (fabricante, classe, tipo de veículo, pedType, ytyp, assetType)
+- [x] CLI `atlas` (`files`, `index`, `search`, `stats`) para dev/debug
 
 **Pronto quando:** `atlas.db` gerado; contagens por kind/DLC batem aproximadamente com o plebmasters.
 
@@ -170,3 +171,4 @@ Referência de padrão: `..\grzyClothTool\CodeWalker\CodeWalker\CustomPedsForm.c
 - 2026-11-02 — Visto `..\grzyClothTool`: usa CodeWalker net48 como DLL em app net10 + `CustomPedsForm : Form, DXForm` hospedado. Trocado plano de "portar renderer" para "referenciar DLL + DXForm próprio".
 - 2026-11-02 — Teste de port: `Rendering/**` + 5 arquivos + 2 stubs compilam em net10 com 0 erros, sem editar upstream. Decidido port nativo por link de arquivos (sem DLL net48).
 - 2026-11-02 — Fase 0 concluída. 14 testes verdes (inclui integração com jogo real). Achado: `x64a.rpf` não tem RPFs aninhados. Leitura de chaves a partir do exe leva ~2s; cache em `settings.json`.
+- 2026-11-02 — Fase 1 fatia 1: props/MLOs/veículos/peds. Scan de todos os RPFs 4s, index total 29s, 161k assets. mp2026_01 bate com plebmasters (objects 1266, peds 9, MLOs 5; veículos 14 vs 13 — o extra é o trailer `trflat2`). Busca 25–50 ms. Indexer não usa `GameFileCache` (mescla e perde origem). DLCs `*_g9ec` são packs do Enhanced também presentes no Legacy.

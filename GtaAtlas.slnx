@@ -6,7 +6,16 @@
     <Project Path="external/CodeWalker/CodeWalker.Core/CodeWalker.Core.csproj" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/GtaAtlas.Cli/GtaAtlas.Cli.csproj">
+      <Platform Project="x64" />
+    </Project>
     <Project Path="src/GtaAtlas.Core/GtaAtlas.Core.csproj" />
+    <Project Path="src/GtaAtlas.Data/GtaAtlas.Data.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/GtaAtlas.Indexer/GtaAtlas.Indexer.csproj">
+      <Platform Project="x64" />
+    </Project>
     <Project Path="src/GtaAtlas.Render/GtaAtlas.Render.csproj" />
   </Folder>
   <Folder Name="/tests/">

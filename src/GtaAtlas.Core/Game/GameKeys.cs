@@ -13,20 +13,20 @@ public static class GameKeys
     {
         lock (Gate)
         {
-            if (_loadedFor == install)
-                return false;
-
-            try
+            if (_loadedFor != install)
             {
-                GTA5Keys.LoadFromPath(install.Folder, install.Gen9, settings.AesKey);
-            }
-            catch when (settings.AesKey is not null)
-            {
-                // Cached key is stale (game updated or switched install): rescan the exe.
-                GTA5Keys.LoadFromPath(install.Folder, install.Gen9, null);
+                try
+                {
+                    GTA5Keys.LoadFromPath(install.Folder, install.Gen9, settings.AesKey);
+                }
+                catch when (settings.AesKey is not null)
+                {
+                    // Cached key is stale (game updated or switched install): rescan the exe.
+                    GTA5Keys.LoadFromPath(install.Folder, install.Gen9, null);
+                }
+                _loadedFor = install;
             }
 
-            _loadedFor = install;
             var key = Convert.ToBase64String(GTA5Keys.PC_AES_KEY);
             if (key == settings.AesKey)
                 return false;
