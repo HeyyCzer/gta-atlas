@@ -1,165 +1,226 @@
 using GtaAtlas.App.Browsing;
+using GtaAtlas.App.Ui.Controls;
 using GtaAtlas.Data;
 
 namespace GtaAtlas.App.Ui;
 
-/// <summary>Right-hand panel: identity (name and hash in every notation), tags, kind-specific data and source files.</summary>
-internal sealed class DetailView : UserControl
+/// <summary>
+/// Scrollable info column of the detail window: hashes, tags, kind-specific properties and source files.
+/// Every value row copies on click.
+/// </summary>
+internal sealed class DetailView : ThemedControl
 {
-    private readonly Label _title = new() { AutoSize = false, Dock = DockStyle.Top, Font = Theme.Title, ForeColor = Theme.Text, AutoEllipsis = true };
-    private readonly Label _subtitle = new() { AutoSize = false, Dock = DockStyle.Top, ForeColor = Theme.Muted, AutoEllipsis = true };
-    private readonly Button _favorite = new() { AutoSize = true, FlatStyle = FlatStyle.Flat };
-    private readonly Button _copyName = new() { AutoSize = true, FlatStyle = FlatStyle.Flat, Text = "Copy name" };
-    private readonly ListView _fields = new()
-    {
-        Dock = DockStyle.Fill,
-        View = View.Details,
-        FullRowSelect = true,
-        HeaderStyle = ColumnHeaderStyle.None,
-        BorderStyle = BorderStyle.None,
-        BackColor = Theme.Panel,
-        ForeColor = Theme.Text,
-        ShowItemToolTips = true,
-    };
+    private abstract record Block(Rectangle Bounds);
+    private sealed record HeaderBlock(Rectangle Bounds, string Text) : Block(Bounds);
+    private sealed record RowBlock(Rectangle Bounds, string Label, string Value, bool Mono) : Block(Bounds);
+    private sealed record ChipsBlock(IReadOnlyList<(string Text, Rectangle Bounds)> Chips) : Block(Rectangle.Empty);
 
+    private const TextFormatFlags Wrap = TextFormatFlags.Left | TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl | TextFormatFlags.NoPrefix;
+
+    private readonly List<Block> _blocks = [];
     private AssetDetail? _detail;
-    private bool _isFavorite;
+    private int _scroll;
+    private int _contentHeight;
+    private RowBlock? _hover;
 
     public DetailView()
     {
-        BackColor = Theme.Panel;
-        Padding = new Padding(12);
-
-        _fields.Columns.Add("Field", 110);
-        _fields.Columns.Add("Value", 240);
-        _fields.DoubleClick += (_, _) => CopySelectedField();
-        _fields.KeyDown += (_, e) =>
-        {
-            if (e is { Control: true, KeyCode: Keys.C })
-            {
-                CopySelectedField();
-                e.Handled = true;
-            }
-        };
-        _fields.Resize += (_, _) => _fields.Columns[1].Width = Math.Max(80, _fields.ClientSize.Width - _fields.Columns[0].Width);
-
-        _favorite.Click += (_, _) =>
-        {
-            if (_detail is null)
-                return;
-            _isFavorite = !_isFavorite;
-            UpdateFavoriteButton();
-            FavoriteToggled?.Invoke(this, _isFavorite);
-        };
-        _copyName.Click += (_, _) =>
-        {
-            if (_detail is not null)
-                Copied?.Invoke(this, AssetText.CopyText(_detail.Asset));
-        };
-
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(0, 6, 0, 6), WrapContents = false };
-        buttons.Controls.AddRange([_favorite, _copyName]);
-
-        // Docked top controls stack in reverse add order.
-        Controls.Add(_fields);
-        Controls.Add(buttons);
-        Controls.Add(_subtitle);
-        Controls.Add(_title);
-        _title.Height = LogicalToDeviceUnits(30);
-        _subtitle.Height = LogicalToDeviceUnits(20);
-        Display(null, false);
+        BackColor = Theme.Surface;
     }
 
-    /// <summary>Raised with the text the user asked to copy.</summary>
+    /// <summary>Raised with the value the user clicked.</summary>
     public event EventHandler<string>? Copied;
 
-    public event EventHandler<bool>? FavoriteToggled;
-
-    public AssetDetail? Detail => _detail;
-
-    public void Display(AssetDetail? detail, bool favorite)
+    public void Display(AssetDetail? detail)
     {
         _detail = detail;
-        _isFavorite = favorite;
-        _favorite.Visible = _copyName.Visible = _fields.Visible = detail is not null;
-        UpdateFavoriteButton();
+        _scroll = 0;
+        Rebuild();
+        Invalidate();
+    }
 
-        _fields.BeginUpdate();
-        _fields.Items.Clear();
-        _fields.Groups.Clear();
-        if (detail is null)
-        {
-            _title.Text = "";
-            _subtitle.Text = "Select an asset";
-            _fields.EndUpdate();
+    private int LabelWidth => Px(118);
+    private int Pad => Px(24);
+
+    private void Rebuild()
+    {
+        _blocks.Clear();
+        _hover = null;
+        if (_detail is null || Width <= 0)
             return;
-        }
 
-        var a = detail.Asset;
-        _title.Text = a.Name;
-        _subtitle.Text = AssetText.Subtitle(a) is { } sub ? $"{AssetText.KindTitle(a.Kind)} · {sub}" : AssetText.KindTitle(a.Kind);
+        var a = _detail.Asset;
+        var y = Px(4);
+        var width = Width - Pad * 2;
 
-        var identity = Group("Identity");
-        Add(identity, "Name", a.Name);
-        if (a.Key != a.Name)
-            Add(identity, "Key", a.Key);
-        if (a.DisplayName is not null)
-            Add(identity, "Display name", a.DisplayName);
-        Add(identity, "Kind", AssetText.KindTitle(a.Kind));
-        Add(identity, "DLC", a.Dlc);
-        Add(identity, "Hash", a.Hash.ToString());
-        Add(identity, "Hash (int32)", HashText.ToSigned(a.Hash));
-        Add(identity, "Hash (hex)", HashText.ToHex(a.Hash));
-        if (detail.Parent is { } parent)
-            Add(identity, "Parent", parent.Name);
-
-        if (detail.Tags.Count > 0)
+        void Header(string text)
         {
-            var tags = Group("Tags");
-            Add(tags, "Tags", string.Join(", ", detail.Tags));
+            y += Px(14);
+            _blocks.Add(new HeaderBlock(new Rectangle(Pad, y, width, Px(22)), text.ToUpperInvariant()));
+            y += Px(26);
         }
 
-        var data = AssetText.DataFields(detail.Data);
+        void Row(string label, string value, bool mono = false)
+        {
+            var font = mono ? Theme.Mono : Theme.UiFont;
+            var valueWidth = width - LabelWidth - Px(40);
+            var h = Math.Max(Px(34), TextRenderer.MeasureText(value, font, new Size(valueWidth, 0), Wrap).Height + Px(16));
+            _blocks.Add(new RowBlock(new Rectangle(Pad, y, width, h), label, value, mono));
+            y += h;
+        }
+
+        Header("Hash");
+        Row("Joaat", a.Hash.ToString(), true);
+        Row("Signed", HashText.ToSigned(a.Hash), true);
+        Row("Hex", HashText.ToHex(a.Hash), true);
+
+        Header("Identity");
+        Row("Name", a.Name);
+        if (a.Key != a.Name)
+            Row("Key", a.Key);
+        if (a.DisplayName is not null)
+            Row("Display name", a.DisplayName);
+        Row("DLC", a.Dlc);
+        if (_detail.Parent is { } parent)
+            Row(AssetText.KindTitle(parent.Kind), parent.Name);
+
+        if (_detail.Tags.Count > 0)
+        {
+            Header("Tags");
+            var chips = new List<(string, Rectangle)>();
+            var x = Pad;
+            var chipHeight = Px(26);
+            foreach (var tag in _detail.Tags)
+            {
+                var w = TextRenderer.MeasureText(tag, Theme.Small).Width + Px(18);
+                if (x + w > Pad + width && x > Pad)
+                {
+                    x = Pad;
+                    y += chipHeight + Px(6);
+                }
+                chips.Add((tag, new Rectangle(x, y, w, chipHeight)));
+                x += w + Px(6);
+            }
+            y += chipHeight + Px(4);
+            _blocks.Add(new ChipsBlock(chips));
+        }
+
+        var data = AssetText.DataFields(_detail.Data);
         if (data.Count > 0)
         {
-            var group = Group("Data");
+            Header("Properties");
             foreach (var f in data)
-                Add(group, f.Label, f.Value);
+                Row(f.Label, f.Value);
         }
 
-        var sources = Group(detail.Sources.Count > 1 ? $"Sources ({detail.Sources.Count}, later override earlier)" : "Source");
-        foreach (var s in detail.Sources)
-            Add(sources, s.Dlc, s.Path);
+        Header(_detail.Sources.Count > 1 ? $"Sources · {_detail.Sources.Count}, later override earlier" : "Source");
+        foreach (var s in _detail.Sources)
+            Row(s.Dlc, s.Path, true);
 
-        _fields.EndUpdate();
+        _contentHeight = y + Px(24);
+        _scroll = Math.Clamp(_scroll, 0, MaxScroll);
     }
 
-    public void FocusFields()
+    private int MaxScroll => Math.Max(0, _contentHeight - Height);
+
+    protected override void OnResize(EventArgs e)
     {
-        _fields.Focus();
-        if (_fields.Items.Count > 0 && _fields.SelectedItems.Count == 0)
-            _fields.Items[0].Selected = true;
+        base.OnResize(e);
+        Rebuild();
     }
 
-    private ListViewGroup Group(string header)
+    protected override void OnPaint(PaintEventArgs e)
     {
-        var g = new ListViewGroup(header);
-        _fields.Groups.Add(g);
-        return g;
+        var g = e.Graphics;
+        g.Clear(BackColor);
+        g.TranslateTransform(0, -_scroll);
+
+        foreach (var block in _blocks)
+        {
+            switch (block)
+            {
+                case HeaderBlock h:
+                    TextRenderer.DrawText(g, h.Text, Theme.Caption, h.Bounds, Theme.Faint, Theme.Line);
+                    break;
+                case RowBlock r:
+                    PaintRow(g, r);
+                    break;
+                case ChipsBlock c:
+                    foreach (var (text, bounds) in c.Chips)
+                    {
+                        Theme.FillRounded(g, bounds, bounds.Height / 2, Theme.Raised, Theme.Border);
+                        TextRenderer.DrawText(g, text, Theme.Small, bounds, Theme.Text, Theme.Centered);
+                    }
+                    break;
+            }
+        }
+
+        g.ResetTransform();
+        if (MaxScroll > 0)
+        {
+            var h = Math.Max(Px(30), Height * Height / _contentHeight);
+            var y = (Height - h) * _scroll / MaxScroll;
+            Theme.FillRounded(g, new Rectangle(Width - Px(6), y, Px(3), h), Px(1), Theme.BorderStrong);
+        }
     }
 
-    private void Add(ListViewGroup group, string label, string value) =>
-        _fields.Items.Add(new ListViewItem([label, value], group) { ToolTipText = value });
-
-    private void CopySelectedField()
+    private void PaintRow(Graphics g, RowBlock r)
     {
-        if (_fields.SelectedItems.Count > 0)
-            Copied?.Invoke(this, _fields.SelectedItems[0].SubItems[1].Text);
+        var hover = r == _hover;
+        if (hover)
+        {
+            Theme.FillRounded(g, Rectangle.Inflate(r.Bounds, Px(10), 0), Px(8), Theme.Hover);
+        }
+        else
+        {
+            using var pen = new Pen(Color.FromArgb(0x22, 0x24, 0x2A));
+            g.DrawLine(pen, r.Bounds.Left, r.Bounds.Bottom - 1, r.Bounds.Right, r.Bounds.Bottom - 1);
+        }
+
+        var label = new Rectangle(r.Bounds.X, r.Bounds.Y + Px(8), LabelWidth - Px(8), r.Bounds.Height - Px(16));
+        TextRenderer.DrawText(g, r.Label, Theme.UiFont, label, Theme.Muted, Wrap | TextFormatFlags.EndEllipsis);
+        var value = new Rectangle(r.Bounds.X + LabelWidth, r.Bounds.Y + Px(8), r.Bounds.Width - LabelWidth - Px(40), r.Bounds.Height - Px(8));
+        TextRenderer.DrawText(g, r.Value, r.Mono ? Theme.Mono : Theme.UiFont, value, Theme.Text, Wrap);
+        if (hover)
+            Theme.DrawIcon(g, Glyph.Copy, new Rectangle(r.Bounds.Right - Px(28), r.Bounds.Y, Px(24), Math.Min(r.Bounds.Height, Px(34))), Theme.Accent, Theme.IconSmall);
     }
 
-    private void UpdateFavoriteButton()
+    protected override void OnMouseWheel(MouseEventArgs e)
     {
-        _favorite.Text = _isFavorite ? "★ Favorite" : "☆ Favorite";
-        _favorite.ForeColor = _isFavorite ? Theme.Accent : Theme.Text;
+        _scroll = Math.Clamp(_scroll - e.Delta / 120 * Px(60), 0, MaxScroll);
+        UpdateHover(PointToClient(MousePosition));
+        Invalidate();
+        base.OnMouseWheel(e);
+    }
+
+    private void UpdateHover(Point p)
+    {
+        var content = p with { Y = p.Y + _scroll };
+        var hit = _blocks.OfType<RowBlock>().FirstOrDefault(r => Rectangle.Inflate(r.Bounds, Px(10), 0).Contains(content));
+        if (hit != _hover)
+        {
+            _hover = hit;
+            Cursor = hit is null ? Cursors.Default : Cursors.Hand;
+            Invalidate();
+        }
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        UpdateHover(e.Location);
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        _hover = null;
+        base.OnMouseLeave(e);
+    }
+
+    protected override void OnMouseClick(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left && _hover is { } r)
+            Copied?.Invoke(this, r.Value);
+        base.OnMouseClick(e);
     }
 }

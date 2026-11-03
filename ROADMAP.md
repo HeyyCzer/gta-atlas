@@ -88,13 +88,15 @@ Cada fase termina em algo utilizável e verificável. Marque `[x]` ao concluir e
 **Pronto quando:** `atlas.db` gerado; contagens por kind/DLC batem aproximadamente com o plebmasters.
 
 ### Fase 2 — Shell da UI + navegação
-- [x] Janela principal dark: sidebar (Props, Vehicles, Peds, Clothes, Animations, Anim dicts, MLOs, IPLs, YMAPs, All, DLCs, Favoritos) com contagens
-- [x] Barra superior: busca (debounce 150 ms, async, resultado velho descartado), filtros (DLC, gênero só em Clothes), chips das tags mais comuns do kind
-- [x] Grid de cards **virtualizado** (`AssetGridView` owner-draw, páginas de 200 sob demanda com LRU em `ResultPager`) com nome, subtítulo, tags, badge de DLC, botão copiar, tooltip
+- [x] Janela principal dark, controles owner-draw próprios (`Ui/Controls`: `NavSidebar`, `SearchBox`, `Dropdown` com filtro, `Segmented`, `ChipBar`, `PillButton`, `Toast`); fontes Segoe UI Variable + ícones Segoe Fluent Icons; barra de título escura via DWM
+- [x] Sidebar por seções (Browse / World / Library) com contagens. Cabeçalho: título + nº de resultados + ms, alternância Todos | ★ Favoritos (por categoria), grid | lista
+- [x] Busca (debounce 150 ms, async, resultado velho descartado), filtros DLC (mais recente primeiro, com filtro de texto) e gênero (só Clothes), chips das tags mais comuns
+- [x] Grid de cards **virtualizado** (`AssetGridView`, páginas de 200 sob demanda com LRU em `ResultPager`): área de imagem (placeholder por kind até a Fase 4), nome, subtítulo, DLC, copiar no hover
 - [x] Alternar grid ↔ lista compacta (Ctrl+L)
-- [x] Painel de detalhe: name, key, hash/int32/hex, display name, DLC, tags, JSON achatado (`AssetText.DataFields`), fontes; duplo-clique/Ctrl+C copia valor
-- [x] Atalhos: Ctrl+F, Enter/↓ na busca vai pro grid, Enter abre detalhe, Esc volta/limpa, Ctrl+C copia nome (clip = `dict clip`), Ctrl+D favorito, setas/PgUp/PgDn/Home/End
-- [x] Favoritos persistidos no DB
+- [x] Detalhe em janela modal (`DetailForm`, duplo-clique/Enter): preview à esquerda (lugar do viewport 3D), à direita hashes, identidade, tags, propriedades (`AssetText.DataFields`) e fontes; clique em linha copia; ←/→ navega no resultado; Esc fecha
+- [x] Atalhos: Ctrl+F, Enter/↓ na busca vai pro grid, Enter abre detalhe, Esc volta/limpa, Ctrl+C copia nome (clip = `dict clip`), Ctrl+D favorito, Ctrl+L grid/lista, setas/PgUp/PgDn/Home/End
+- [x] Página DLCs: tabela própria (`DlcTableView`), ordenável por coluna (`DlcTable`), padrão mais recente primeiro; duplo-clique abre All filtrado pelo pack
+- [x] Favoritos persistidos no DB, filtrados dentro de cada categoria (sem aba própria)
 - [x] Tela de primeira execução / Reindex: escolher/detectar pasta → indexar com barra de progresso (`IndexForm`); erros em `logs\index.log`
 - [x] Ícone do app (`Resources/atlas.ico` 16–256 px, gerado por `make-icon.py`): globo teal + marcador, sem marca Rockstar
 - [ ] Ordenação natural em nomes de roupa (`C/0/10/F` vem antes de `C/0/2/F`)
@@ -177,3 +179,4 @@ Referência de padrão: `..\grzyClothTool\CodeWalker\CodeWalker\CustomPedsForm.c
 - 2026-11-02 — Fase 1 fatia 2: anims + ymaps. mp2026_01 bate 100% com plebmasters exceto trailer (anims 3216 incluindo cutscenes, YMAPs 19, IPLs 9). Performance: `YcdFile` completo era 90% do tempo → leitor enxuto (1564s→71s CPU). DB reconstruído em arquivo novo sem journal/índices e trocado no fim: escrita 90s→7s, 497→253 MB. Index total 32s (466k assets). Schema ainda não lançado → editar v1 direto e apagar DB local, sem migrations novas.
 - 2026-11-02 — Fase 1 concluída (roupas). Achados: (1) `dlclist.xml` mistura `<Item>`/`<item>` — parser pegava só metade; (2) ordem de carga real = setup2 `order` (confirmado pela numeração de roupas), mas patchdays com order baixo reenviam conteúdo de DLCs posteriores via RPFs `overlay=true` → regra geral: DLC que introduz um asset = primeira fonte fora de overlay (`DlcOverlays` lê content.xml); (3) packs `*_g9ec` são do Enhanced: no Legacy não entram na numeração de roupas e demais assets ganham tag `enhanced`. Referência de validação: `DurtyFree/gta-v-data-dumps` (`pedComponentVariations_free.json`, mesmo autor do plebmasters) — útil também para validar outras fases.
 - 2026-11-02 — Fase 2 concluída (falta só ordenação natural de roupas). Medido em 471k assets: browse por kind 100 ms → 5–9 ms (índices de expressão `(kind, name GLOB '0x*', name)` + count sem JOIN de dlc); nomes só-hash (`0x…`) vão pro fim; favoritos 632 → 16 ms (subquery partindo de `favorite`). Busca com palavra de 1–2 letras ainda ~250 ms (LIKE full scan) — UI é async, aceitável. `GetFolderPath` ignora `LOCALAPPDATA` → `GTA_ATLAS_HOME` sobrepõe a pasta de dados (testar primeira execução: `$env:GTA_ATLAS_HOME="..."`). `atlas search --repeat n` mede query quente.
+- 2026-11-02 — Redesign da UI (pedido do usuário, referência visual forge.plebmasters): tudo owner-draw com tema único em `Theme`; painel lateral de detalhe → modal; favoritos por categoria; DLCs ordenáveis. Glyphs de ícone precisam de `Theme.Icon*` (fonte de texto mostra "·"). `TextBox.PlaceholderText` em vez de pintar por baixo (o TextBox cobre).

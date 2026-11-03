@@ -10,12 +10,15 @@ public sealed record BrowseState
     public string? Dlc { get; init; }
     public Gender Gender { get; init; }
 
+    /// <summary>Only the user's favorites within the current category.</summary>
+    public bool FavoritesOnly { get; init; }
+
     /// <summary>Tag chips toggled on by the user (on top of the category's own tags).</summary>
     public IReadOnlyList<string> Tags { get; init; } = [];
 
     /// <summary>Switching category drops filters that belong to the old one.</summary>
     public BrowseState WithCategory(Category category) =>
-        this with { Category = category, Tags = [], Gender = category.HasGender ? Gender : Gender.Any };
+        this with { Category = category, Tags = [], Gender = category.HasGender ? Gender : Gender.Any, FavoritesOnly = false };
 
     public BrowseState ToggleTag(string tag) =>
         this with { Tags = Tags.Contains(tag) ? Tags.Where(t => t != tag).ToList() : [.. Tags, tag] };
@@ -32,7 +35,7 @@ public sealed record BrowseState
             Kind = Category.Kind,
             Dlc = Dlc,
             Tags = tags.Distinct().ToList(),
-            FavoritesOnly = Category.FavoritesOnly,
+            FavoritesOnly = FavoritesOnly,
             Offset = offset,
             Limit = limit,
         };

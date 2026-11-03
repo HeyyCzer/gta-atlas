@@ -31,6 +31,9 @@ internal sealed class IndexForm : Form
 
         Text = firstRun ? "GTA Atlas — first run" : "GTA Atlas — reindex";
         Icon = AppIcon.Get();
+        Theme.ApplyWindowChrome(this);
+        BackColor = Theme.Surface;
+        ForeColor = Theme.Text;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = MinimizeBox = false;
         StartPosition = FormStartPosition.CenterParent;

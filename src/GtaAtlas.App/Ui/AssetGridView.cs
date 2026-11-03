@@ -39,9 +39,14 @@ internal sealed class AssetGridView : Control
     public event EventHandler? ItemActivated;
     public event EventHandler<AssetSummary>? CopyRequested;
 
+    /// <summary>Shown when there are no results.</summary>
+    public string EmptyText { get; set; } = "No results";
+
     public int Count => _pager.Total;
 
     public AssetSummary? SelectedItem => _pager[_selected];
+
+    public AssetSummary? ItemAt(int index) => _pager[index];
 
     public int SelectedIndex
     {
@@ -90,57 +95,62 @@ internal sealed class AssetGridView : Control
 
     private int Px(int logical) => LogicalToDeviceUnits(logical);
 
-    private int Gap => Px(8);
-    private int CardWidth => Px(300);
-    private int CardHeight => Px(92);
-    private int ListRowHeight => Px(28);
-    private int ViewWidth => ClientSize.Width - _scrollBar.Width;
+    private int Gap => Px(14);
+    private int Inset => Px(24);
+    private int MinCardWidth => Px(200);
+    private int ImageHeight => Px(132);
+    private int InfoHeight => Px(78);
+    private int CardHeight => ImageHeight + InfoHeight;
+    private int ListRowHeight => Px(40);
+    private int ListHeaderHeight => Px(34);
+    private int ViewWidth => ClientSize.Width - (_scrollBar.Visible ? _scrollBar.Width : 0);
+    private int ContentTop => _mode == ViewMode.List ? ListHeaderHeight : Px(4);
 
-    private int Columns => _mode == ViewMode.List ? 1 : Math.Max(1, (ViewWidth - Gap) / (CardWidth + Gap));
+    private int Columns => _mode == ViewMode.List ? 1 : Math.Max(1, (ViewWidth - Inset * 2 + Gap) / (MinCardWidth + Gap));
     private int RowHeight => _mode == ViewMode.List ? ListRowHeight : CardHeight + Gap;
     private int Rows => (Count + Columns - 1) / Columns;
-    private int VisibleRows => Math.Max(1, ClientSize.Height / RowHeight);
+    private int VisibleRows => Math.Max(1, (ClientSize.Height - ContentTop) / RowHeight);
 
-    /// <summary>Grid cards stretch to fill the row so there is no ragged gap on the right.</summary>
-    private int CellWidth => _mode == ViewMode.List ? ViewWidth : (ViewWidth - Gap) / Columns - Gap;
+    /// <summary>Cards stretch to fill the row so there is no ragged gap on the right.</summary>
+    private int CellWidth => _mode == ViewMode.List ? ViewWidth - Inset * 2 : (ViewWidth - Inset * 2 - Gap * (Columns - 1)) / Columns;
 
     private Rectangle ItemBounds(int index)
     {
         var row = index / Columns;
         var col = index % Columns;
-        var y = row * RowHeight - _scrollBar.Value;
+        var y = ContentTop + row * RowHeight - _scrollBar.Value;
         return _mode == ViewMode.List
-            ? new Rectangle(0, y, ViewWidth, ListRowHeight)
-            : new Rectangle(Gap + col * (CellWidth + Gap), y + Gap, CellWidth, CardHeight);
+            ? new Rectangle(Inset, y, CellWidth, ListRowHeight)
+            : new Rectangle(Inset + col * (CellWidth + Gap), y, CellWidth, CardHeight);
     }
 
     private Rectangle CopyBounds(Rectangle item)
     {
-        var s = Px(22);
+        var s = Px(30);
         return _mode == ViewMode.List
-            ? new Rectangle(item.Right - s - Px(4), item.Y + (item.Height - s) / 2, s, s)
-            : new Rectangle(item.Right - s - Px(4), item.Y + Px(4), s, s);
+            ? new Rectangle(item.Right - s - Px(6), item.Y + (item.Height - s) / 2, s, s)
+            : new Rectangle(item.Right - s - Px(8), item.Y + Px(8), s, s);
     }
 
     private int HitTest(Point p)
     {
-        if (p.X >= ViewWidth)
+        if (p.X >= ViewWidth || p.Y < ContentTop)
             return -1;
-        var y = p.Y + _scrollBar.Value;
-        var row = y / RowHeight;
-        var col = _mode == ViewMode.List ? 0 : Math.Min(Columns - 1, (p.X - Gap / 2) / (CellWidth + Gap));
+        var row = (p.Y - ContentTop + _scrollBar.Value) / RowHeight;
+        var col = _mode == ViewMode.List ? 0 : Math.Clamp((p.X - Inset) / (CellWidth + Gap), 0, Columns - 1);
         var index = row * Columns + col;
         return index >= 0 && index < Count && ItemBounds(index).Contains(p) ? index : -1;
     }
 
     private void UpdateScroll()
     {
-        var content = Rows * RowHeight + (_mode == ViewMode.Grid ? Gap : 0);
+        var content = Rows * RowHeight + Inset;
+        var view = Math.Max(1, ClientSize.Height - ContentTop);
         _scrollBar.Minimum = 0;
-        _scrollBar.LargeChange = Math.Max(1, ClientSize.Height);
+        _scrollBar.LargeChange = view;
         _scrollBar.SmallChange = RowHeight;
         _scrollBar.Maximum = Math.Max(0, content);
-        _scrollBar.Enabled = content > ClientSize.Height;
+        _scrollBar.Visible = content > view;
         ClampScroll(_scrollBar.Value);
     }
 
@@ -151,12 +161,13 @@ internal sealed class AssetGridView : Control
     {
         if (index < 0)
             return;
+        var view = ClientSize.Height - ContentTop;
         var top = index / Columns * RowHeight;
-        var bottom = top + RowHeight + (_mode == ViewMode.Grid ? Gap : 0);
+        var bottom = top + RowHeight;
         if (top < _scrollBar.Value)
             ClampScroll(top);
-        else if (bottom > _scrollBar.Value + ClientSize.Height)
-            ClampScroll(bottom - ClientSize.Height);
+        else if (bottom > _scrollBar.Value + view)
+            ClampScroll(bottom - view);
     }
 
     protected override void OnResize(EventArgs e)
@@ -175,13 +186,15 @@ internal sealed class AssetGridView : Control
         g.Clear(BackColor);
         if (Count == 0)
         {
-            TextRenderer.DrawText(g, "No results", Theme.UiFont, new Rectangle(0, 0, ViewWidth, Px(80)), Theme.Muted,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            var r = new Rectangle(0, Px(60), ViewWidth, Px(120));
+            Theme.DrawIcon(g, Glyph.Search, new Rectangle(r.X, r.Y, r.Width, Px(60)), Theme.Faint, Theme.IconLarge);
+            TextRenderer.DrawText(g, EmptyText, Theme.Bold, new Rectangle(r.X, r.Y + Px(64), r.Width, Px(24)), Theme.Muted, Theme.Centered);
             return;
         }
 
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        var first = _scrollBar.Value / RowHeight * Columns;
+        var firstRow = Math.Max(0, _scrollBar.Value / RowHeight);
+        var first = firstRow * Columns;
         var last = Math.Min(Count - 1, ((_scrollBar.Value + ClientSize.Height) / RowHeight + 1) * Columns - 1);
         for (var i = first; i <= last; i++)
         {
@@ -193,138 +206,131 @@ internal sealed class AssetGridView : Control
             else
                 PaintCard(g, item, i, bounds);
         }
+
+        if (_mode == ViewMode.List)
+            PaintListHeader(g);
     }
 
     private void PaintCard(Graphics g, AssetSummary item, int index, Rectangle r)
     {
         var selected = index == _selected;
-        using (var path = RoundedRect(r, Px(6)))
+        var hover = index == _hover;
+        var radius = Px(12);
+        Theme.FillRounded(g, r, radius, hover || selected ? Theme.Raised : Theme.Surface,
+            selected ? Theme.Accent : hover ? Theme.BorderStrong : Theme.Border);
+
+        // Image area: placeholder tile until thumbnails exist (Phase 4).
+        var kindColor = Theme.KindColor(item.Kind);
+        var image = new Rectangle(r.X + Px(6), r.Y + Px(6), r.Width - Px(12), ImageHeight - Px(6));
+        using (var path = Theme.RoundedRect(image, Px(8)))
+        using (var brush = new LinearGradientBrush(image, Color.FromArgb(0x22, kindColor), Color.FromArgb(0x08, kindColor), 90f))
         {
-            using var fill = new SolidBrush(selected ? Theme.Selected : index == _hover ? Theme.CardHover : Theme.Card);
-            g.FillPath(fill, path);
-            using var pen = new Pen(selected && Focused ? Theme.Accent : Theme.Border);
-            g.DrawPath(pen, path);
-        }
-
-        // Placeholder tile until thumbnails exist (Phase 4).
-        var pad = Px(10);
-        var tile = new Rectangle(r.X + pad, r.Y + pad, r.Height - pad * 2, r.Height - pad * 2);
-        using (var path = RoundedRect(tile, Px(4)))
-        using (var brush = new SolidBrush(Color.FromArgb(60, Theme.KindColor(item.Kind))))
+            using var back = new SolidBrush(Theme.Back);
+            g.FillPath(back, path);
             g.FillPath(brush, path);
-        TextRenderer.DrawText(g, KindGlyph(item.Kind), Theme.Tile, tile, Theme.KindColor(item.Kind),
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+        }
+        Theme.DrawIcon(g, KindGlyph(item.Kind), image, Color.FromArgb(0xB0, kindColor), Theme.IconLarge);
 
-        var x = tile.Right + pad;
-        var copy = CopyBounds(r);
-        var textWidth = copy.Left - x - Px(2);
-        var line = TextRenderer.MeasureText("Ag", Theme.Bold).Height;
-        var y = r.Y + Px(8);
-        DrawText(g, item.Name, Theme.Bold, new Rectangle(x, y, textWidth, line), Theme.Text);
-        y += line;
+        // Kind label on the image, bottom-left.
+        var kind = AssetText.KindTitle(item.Kind).ToUpperInvariant();
+        var kindSize = TextRenderer.MeasureText(kind, Theme.Caption);
+        var kindRect = new Rectangle(image.X + Px(8), image.Bottom - Px(26), kindSize.Width + Px(6), Px(18));
+        Theme.FillRounded(g, kindRect, Px(4), Color.FromArgb(0xC0, Theme.Back));
+        TextRenderer.DrawText(g, kind, Theme.Caption, kindRect, kindColor, Theme.Centered);
 
-        var small = TextRenderer.MeasureText("Ag", Theme.Small).Height;
-        if (AssetText.Subtitle(item) is { } sub)
-            DrawText(g, sub, Theme.UiFont, new Rectangle(x, y, r.Right - x - pad, small + Px(2)), Theme.Muted);
-        y += small + Px(3);
-        if (item.Tags.Count > 0)
-            DrawText(g, string.Join(" · ", item.Tags), Theme.Small, new Rectangle(x, y, r.Right - x - pad, small), Theme.Muted);
+        if (hover || selected)
+            PaintCopy(g, CopyBounds(r), index, Color.FromArgb(0xD0, Theme.Back));
 
-        PaintBadge(g, item.Dlc, x, r.Bottom - small - Px(10));
-        PaintCopy(g, copy, index);
+        var x = r.X + Px(14);
+        var w = r.Width - Px(28);
+        var y = r.Y + ImageHeight + Px(6);
+        TextRenderer.DrawText(g, item.Name, Theme.Bold, new Rectangle(x, y, w, Px(22)), Theme.Text, Theme.Line);
+        y += Px(21);
+        var sub = AssetText.Subtitle(item) ?? (item.Tags.Count > 0 ? string.Join(" · ", item.Tags) : null);
+        if (sub is not null)
+            TextRenderer.DrawText(g, sub, Theme.Small, new Rectangle(x, y, w, Px(18)), Theme.Muted, Theme.Line);
+        y += Px(22);
+        PaintBadge(g, item.Dlc, x, y, w);
     }
+
+    private void PaintListHeader(Graphics g)
+    {
+        var header = new Rectangle(0, 0, ViewWidth, ListHeaderHeight);
+        using (var back = new SolidBrush(BackColor))
+            g.FillRectangle(back, header);
+        using (var pen = new Pen(Theme.Border))
+            g.DrawLine(pen, Inset, header.Bottom - 1, ViewWidth - Inset, header.Bottom - 1);
+        var x = Inset + Px(48);
+        foreach (var (title, share) in ListColumns)
+        {
+            var cw = (int)((CellWidth - Px(48 + 44)) * share);
+            TextRenderer.DrawText(g, title.ToUpperInvariant(), Theme.Caption, new Rectangle(x, 0, cw, header.Height), Theme.Faint, Theme.Line);
+            x += cw;
+        }
+    }
+
+    private static readonly (string Title, float Share)[] ListColumns =
+        [("Name", 0.34f), ("Details", 0.28f), ("Kind", 0.11f), ("DLC", 0.13f), ("Hash", 0.14f)];
 
     private void PaintRow(Graphics g, AssetSummary item, int index, Rectangle r)
     {
         var selected = index == _selected;
-        if (selected || index == _hover)
-        {
-            using var fill = new SolidBrush(selected ? Theme.Selected : Theme.CardHover);
-            g.FillRectangle(fill, r);
-        }
-        if (selected && Focused)
-        {
-            using var accent = new SolidBrush(Theme.Accent);
-            g.FillRectangle(accent, r.X, r.Y, Px(3), r.Height);
-        }
+        var hover = index == _hover;
+        if (selected || hover)
+            Theme.FillRounded(g, Rectangle.Inflate(r, 0, -Px(2)), Px(8), selected ? Theme.AccentSoft : Theme.Raised);
 
-        var copy = CopyBounds(r);
-        var w = copy.Left - Px(8);
-        var cols = new (string? Text, float Share, Font Font, Color Color)[]
+        var kindColor = Theme.KindColor(item.Kind);
+        var icon = new Rectangle(r.X + Px(8), r.Y + (r.Height - Px(28)) / 2, Px(28), Px(28));
+        Theme.FillRounded(g, icon, Px(6), Color.FromArgb(0x26, kindColor));
+        Theme.DrawIcon(g, KindGlyph(item.Kind), icon, kindColor);
+
+        var values = new (string? Text, Font Font, Color Color)[]
         {
-            (item.Name, 0.32f, Theme.Bold, Theme.Text),
-            (AssetText.Subtitle(item), 0.26f, Theme.UiFont, Theme.Muted),
-            (AssetText.KindTitle(item.Kind), 0.10f, Theme.UiFont, Theme.Muted),
-            (item.Dlc, 0.14f, Theme.UiFont, Theme.Muted),
-            (HashText.ToHex(item.Hash), 0.18f, Theme.UiFont, Theme.Muted),
+            (item.Name, Theme.Bold, Theme.Text),
+            (AssetText.Subtitle(item) ?? string.Join(" · ", item.Tags), Theme.UiFont, Theme.Muted),
+            (AssetText.KindTitle(item.Kind), Theme.UiFont, Theme.Muted),
+            (item.Dlc, Theme.UiFont, Theme.Muted),
+            (HashText.ToHex(item.Hash), Theme.Mono, Theme.Muted),
         };
-        var x = Px(12);
-        foreach (var (text, share, font, color) in cols)
+        var x = r.X + Px(48);
+        for (var c = 0; c < values.Length; c++)
         {
-            var cw = (int)(w * share);
-            if (text is not null)
-                DrawText(g, text, font, new Rectangle(x, r.Y, cw - Px(8), r.Height), color);
+            var cw = (int)((r.Width - Px(48 + 44)) * ListColumns[c].Share);
+            if (values[c].Text is { } text)
+                TextRenderer.DrawText(g, text, values[c].Font, new Rectangle(x, r.Y, cw - Px(12), r.Height), values[c].Color, Theme.Line);
             x += cw;
         }
-        PaintCopy(g, copy, index);
+        if (selected || hover)
+            PaintCopy(g, CopyBounds(r), index, Theme.Hover);
     }
 
-    private void PaintBadge(Graphics g, string text, int x, int y)
+    private void PaintBadge(Graphics g, string text, int x, int y, int maxWidth)
     {
-        var size = TextRenderer.MeasureText(text, Theme.Small);
-        var r = new Rectangle(x, y, size.Width + Px(4), size.Height + Px(2));
-        using (var path = RoundedRect(r, Px(4)))
-        using (var brush = new SolidBrush(Theme.Badge))
-            g.FillPath(brush, path);
-        TextRenderer.DrawText(g, text, Theme.Small, r, Theme.Text,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+        var size = TextRenderer.MeasureText(text, Theme.Caption);
+        var r = new Rectangle(x, y, Math.Min(maxWidth, size.Width + Px(10)), Px(20));
+        Theme.FillRounded(g, r, Px(5), Theme.Hover);
+        TextRenderer.DrawText(g, text, Theme.Caption, r, Theme.Muted, Theme.Centered | TextFormatFlags.EndEllipsis);
     }
 
-    private void PaintCopy(Graphics g, Rectangle r, int index)
+    private void PaintCopy(Graphics g, Rectangle r, int index, Color back)
     {
-        if (index != _hover && index != _selected)
-            return;
-        if (index == _hover && _hoverCopy)
-        {
-            using var path = RoundedRect(r, Px(4));
-            using var brush = new SolidBrush(Theme.Badge);
-            g.FillPath(brush, path);
-        }
-        // Two overlapping squares: the usual "copy" glyph.
-        var s = Px(8);
-        var o = Px(3);
-        var cx = r.X + (r.Width - s - o) / 2;
-        var cy = r.Y + (r.Height - s - o) / 2;
-        using var pen = new Pen(index == _hover && _hoverCopy ? Theme.Accent : Theme.Muted, Px(1));
-        g.DrawRectangle(pen, cx + o, cy, s, s);
-        using (var back = new SolidBrush(index == _hover && _hoverCopy ? Theme.Badge : index == _selected ? Theme.Selected : Theme.CardHover))
-            g.FillRectangle(back, cx, cy + o, s, s);
-        g.DrawRectangle(pen, cx, cy + o, s, s);
+        var active = index == _hover && _hoverCopy;
+        Theme.FillRounded(g, r, Px(8), active ? Theme.Accent : back, active ? null : Theme.Border);
+        Theme.DrawIcon(g, Glyph.Copy, r, active ? Theme.Back : Theme.Text, Theme.IconSmall);
     }
 
-    private static void DrawText(Graphics g, string text, Font font, Rectangle r, Color color) =>
-        TextRenderer.DrawText(g, text, font, r, color,
-            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
-
-    private static string KindGlyph(string kind) => kind switch
+    public static string KindGlyph(string kind) => kind switch
     {
-        AssetKind.Prop => "PR",
-        AssetKind.Vehicle => "VE",
-        AssetKind.Ped => "PD",
-        AssetKind.Clothing => "CL",
-        AssetKind.Anim => "AN",
-        AssetKind.AnimDict => "AD",
-        AssetKind.Mlo => "ML",
-        AssetKind.Ymap => "YM",
-        _ => "?",
+        AssetKind.Prop => Glyph.Package,
+        AssetKind.Vehicle => Glyph.Car,
+        AssetKind.Ped => Glyph.Person,
+        AssetKind.Clothing => Glyph.Shop,
+        AssetKind.Anim => Glyph.Play,
+        AssetKind.AnimDict => Glyph.Library,
+        AssetKind.Mlo => Glyph.Home,
+        AssetKind.Ymap => Glyph.MapPin,
+        _ => Glyph.Cube,
     };
-
-    private static GraphicsPath RoundedRect(Rectangle r, int radius)
-    {
-        var path = new GraphicsPath();
-        path.AddRoundedRectangle(r, new Size(radius * 2, radius * 2));
-        return path;
-    }
 
     #endregion
 
@@ -364,7 +370,7 @@ internal sealed class AssetGridView : Control
 
     protected override void OnMouseWheel(MouseEventArgs e)
     {
-        ClampScroll(_scrollBar.Value - e.Delta / 120 * RowHeight * (_mode == ViewMode.List ? 3 : 1));
+        ClampScroll(_scrollBar.Value - e.Delta / 120 * (_mode == ViewMode.List ? RowHeight * 3 : RowHeight / 2));
         base.OnMouseWheel(e);
     }
 
@@ -378,7 +384,7 @@ internal sealed class AssetGridView : Control
                 _toolTip.SetToolTip(this, _pager[hit] is { } item ? $"{item.Name}\n{AssetText.Subtitle(item)}".TrimEnd() : null);
             _hover = hit;
             _hoverCopy = onCopy;
-            Cursor = onCopy ? Cursors.Hand : Cursors.Default;
+            Cursor = hit >= 0 ? Cursors.Hand : Cursors.Default;
             Invalidate();
         }
         base.OnMouseMove(e);
@@ -408,7 +414,8 @@ internal sealed class AssetGridView : Control
 
     protected override void OnMouseDoubleClick(MouseEventArgs e)
     {
-        if (HitTest(e.Location) >= 0)
+        var hit = HitTest(e.Location);
+        if (hit >= 0 && !CopyBounds(ItemBounds(hit)).Contains(e.Location))
             ItemActivated?.Invoke(this, EventArgs.Empty);
         base.OnMouseDoubleClick(e);
     }

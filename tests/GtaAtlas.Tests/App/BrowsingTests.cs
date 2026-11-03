@@ -50,11 +50,14 @@ public sealed class BrowseStateTests
     }
 
     [Fact]
-    public void Favorites_category_filters_favorites_of_any_kind()
+    public void Favorites_filter_stays_within_category_and_resets_on_switch()
     {
-        var q = new BrowseState().WithCategory(Category.Favorites).ToQuery();
+        var s = new BrowseState().WithCategory(Category.Clothes) with { FavoritesOnly = true };
+        var q = s.ToQuery();
         Assert.True(q.FavoritesOnly);
-        Assert.Null(q.Kind);
+        Assert.Equal(AssetKind.Clothing, q.Kind);
+
+        Assert.False(s.WithCategory(Category.Props).ToQuery().FavoritesOnly);
     }
 }
 
@@ -174,4 +177,31 @@ public sealed class AssetTextTests
 
     [Fact]
     public void No_data_no_fields() => Assert.Empty(AssetText.DataFields(null));
+}
+
+public sealed class DlcTableTests
+{
+    private static DlcSummary Dlc(int order, string name, int props) =>
+        new(order, name, order, null, null, new Dictionary<string, int> { [AssetKind.Prop] = props });
+
+    private static readonly List<DlcSummary> Dlcs = [Dlc(0, "base", 100), Dlc(1, "mpbeach", 5), Dlc(2, "mpheist", 5)];
+
+    [Fact]
+    public void Default_is_newest_first() =>
+        Assert.Equal(["mpheist", "mpbeach", "base"], DlcTable.Sort(Dlcs, DlcTable.DefaultColumn, DlcTable.DefaultDescending).Select(d => d.Name));
+
+    [Fact]
+    public void Sorts_by_count_with_newest_breaking_ties()
+    {
+        var props = DlcTable.Columns.ToList().FindIndex(c => c.Title == "Props");
+        Assert.Equal(["base", "mpheist", "mpbeach"], DlcTable.Sort(Dlcs, props, true).Select(d => d.Name));
+    }
+
+    [Fact]
+    public void Toggle_flips_same_column_and_picks_natural_direction_for_new_one()
+    {
+        Assert.Equal((0, false), DlcTable.Toggle(0, true, 0));
+        Assert.Equal((1, false), DlcTable.Toggle(0, true, 1)); // text: A→Z
+        Assert.Equal((2, true), DlcTable.Toggle(1, false, 2)); // numbers: biggest first
+    }
 }

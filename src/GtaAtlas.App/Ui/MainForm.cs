@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using GtaAtlas.App.Browsing;
+using GtaAtlas.App.Ui.Controls;
 using GtaAtlas.Core;
 using GtaAtlas.Data;
 using GtaAtlas.Indexer;
@@ -15,41 +16,29 @@ internal sealed class MainForm : Form
     private readonly AtlasDb _db;
     private readonly AssetQueries _queries;
 
-    private readonly ListBox _sidebar = new()
+    private readonly NavSidebar _nav = new() { Dock = DockStyle.Left };
+    private readonly Panel _top = new() { Dock = DockStyle.Top, BackColor = Theme.Back };
+    private readonly PageTitle _title = new();
+    private readonly Segmented _scope = new()
     {
-        Dock = DockStyle.Left,
-        DrawMode = DrawMode.OwnerDrawFixed,
-        BorderStyle = BorderStyle.None,
-        BackColor = Theme.Panel,
-        IntegralHeight = false,
+        Segments = [new Segment(Glyph.Apps, "All"), new Segment(Glyph.StarFilled, "Favorites", "Only your favorites in this category (Ctrl+D toggles)")],
     };
-    private readonly TextBox _search = new() { PlaceholderText = "Search name, display name, tag or hash  (Ctrl+F)", Dock = DockStyle.Fill };
-    private readonly ComboBox _dlc = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 240, FormattingEnabled = true };
-    private readonly ComboBox _gender = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110, FormattingEnabled = true };
-    private readonly Button _viewToggle = new() { FlatStyle = FlatStyle.Flat, AutoSize = true };
-    private readonly Button _reindex = new() { FlatStyle = FlatStyle.Flat, AutoSize = true, Text = "Reindex…" };
-    private readonly FlowLayoutPanel _chips = new() { Dock = DockStyle.Fill, WrapContents = false, AutoScroll = false, Padding = new Padding(0, 2, 0, 0) };
+    private readonly Segmented _view = new()
+    {
+        Segments = [new Segment(Glyph.Grid, null, "Grid (Ctrl+L)"), new Segment(Glyph.List, null, "List (Ctrl+L)")],
+    };
+    private readonly SearchBox _search = new() { Placeholder = "Search by name, display name, tag or hash" };
+    private readonly Dropdown _dlc = new() { Text = "DLC" };
+    private readonly Dropdown _gender = new() { Text = "Gender" };
+    private readonly ChipBar _chips = new();
     private readonly AssetGridView _grid = new() { Dock = DockStyle.Fill };
-    private readonly ListView _dlcList = new()
-    {
-        Dock = DockStyle.Fill,
-        View = View.Details,
-        FullRowSelect = true,
-        BorderStyle = BorderStyle.None,
-        BackColor = Theme.Back,
-        ForeColor = Theme.Text,
-        Visible = false,
-    };
-    private readonly DetailView _detail = new() { Dock = DockStyle.Right };
-    private readonly ToolStripStatusLabel _status = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
-    private readonly ToolStripStatusLabel _indexInfo = new() { ForeColor = Theme.Muted };
+    private readonly DlcTableView _dlcTable = new() { Dock = DockStyle.Fill, Visible = false };
+    private readonly Toast _toast = new();
     private readonly System.Windows.Forms.Timer _searchTimer = new() { Interval = SearchDelayMs };
-    private readonly ToolTip _toolTip = new();
 
     private BrowseState _state = new();
     private IReadOnlyDictionary<string, int> _counts = new Dictionary<string, int>();
     private int _generation;
-    private bool _updatingFilters;
 
     public MainForm(AppPaths paths, AtlasSettings settings, AtlasDb db)
     {
@@ -60,12 +49,13 @@ internal sealed class MainForm : Form
 
         Text = "GTA Atlas";
         Icon = AppIcon.Get();
+        Theme.ApplyWindowChrome(this);
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = Theme.UiFont;
         BackColor = Theme.Back;
         ForeColor = Theme.Text;
-        ClientSize = new Size(1400, 860);
-        MinimumSize = new Size(900, 560);
+        ClientSize = new Size(1440, 900);
+        MinimumSize = new Size(960, 600);
         StartPosition = FormStartPosition.CenterScreen;
         KeyPreview = true;
 
@@ -73,59 +63,65 @@ internal sealed class MainForm : Form
         WireEvents();
     }
 
+    private int Px(int logical) => LogicalToDeviceUnits(logical);
+
     private void BuildLayout()
     {
-        _sidebar.Width = LogicalToDeviceUnits(190);
-        _sidebar.ItemHeight = LogicalToDeviceUnits(32);
-        _sidebar.Items.AddRange([.. Category.Sidebar]);
+        _gender.Items =
+        [
+            new PickerItem(Gender.Any, "Any"),
+            new PickerItem(Gender.Male, "Male"),
+            new PickerItem(Gender.Female, "Female"),
+        ];
+        _top.Controls.AddRange([_title, _scope, _view, _search, _dlc, _gender, _chips]);
+        _top.Layout += (_, _) => LayoutTop();
 
-        _gender.Items.AddRange([Gender.Any, Gender.Male, Gender.Female]);
-        _gender.SelectedIndex = 0;
-        _dlc.Format += (_, e) => e.Value = e.ListItem is DlcSummary d ? DlcLabel(d) : e.ListItem;
-        _gender.Format += (_, e) => e.Value = e.ListItem is Gender.Any ? "Any gender" : e.ListItem?.ToString();
+        var content = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Back };
+        content.Controls.Add(_grid);
+        content.Controls.Add(_dlcTable);
+        content.Controls.Add(_top);
+        content.Controls.Add(_toast);
 
-        var bar = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 5, RowCount = 2, Padding = new Padding(10, 8, 10, 4), BackColor = Theme.Back };
-        bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        for (var i = 0; i < 4; i++)
-            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bar.Controls.Add(_search, 0, 0);
-        bar.Controls.Add(_dlc, 1, 0);
-        bar.Controls.Add(_gender, 2, 0);
-        bar.Controls.Add(_viewToggle, 3, 0);
-        bar.Controls.Add(_reindex, 4, 0);
-        bar.Controls.Add(_chips, 0, 1);
-        bar.SetColumnSpan(_chips, 5);
-        _chips.Height = LogicalToDeviceUnits(32);
-        _search.Margin = new Padding(0, 4, 8, 4);
-        _toolTip.SetToolTip(_viewToggle, "Toggle grid / list (Ctrl+L)");
+        Controls.Add(content);
+        Controls.Add(_nav);
+    }
 
-        foreach (var (title, width) in new[] { ("#", 44), ("Pack", 170), ("Title", 200), ("Props", 70), ("Vehicles", 70), ("Peds", 60), ("Clothes", 70), ("Anims", 80), ("MLOs", 60), ("YMAPs", 70), ("Total", 80) })
-            _dlcList.Columns.Add(title, LogicalToDeviceUnits(width), title is "#" or "Pack" or "Title" ? HorizontalAlignment.Left : HorizontalAlignment.Right);
+    /// <summary>Title row (title, scope, view) / search row (search, DLC, gender) / chip row.</summary>
+    private void LayoutTop()
+    {
+        var pad = Px(24);
+        var w = _top.ClientSize.Width;
+        var y = Px(20);
 
-        _detail.Width = LogicalToDeviceUnits(400);
-        var detailSplitter = new Splitter { Dock = DockStyle.Right, Width = 4, BackColor = Theme.Border };
-        var status = new StatusStrip { SizingGrip = true };
-        status.Items.AddRange([_status, _indexInfo]);
+        _view.Location = new Point(w - pad - _view.Width, y + Px(4));
+        _scope.Location = new Point(_view.Left - Px(10) - _scope.Width, y + Px(4));
+        _title.SetBounds(pad, y, Math.Max(0, (_scope.Visible ? _scope.Left : _view.Left) - pad * 2), Px(48));
+        y += Px(62);
 
-        // Last added docks outermost: sidebar spans full height, status the full width.
-        Controls.Add(_grid);
-        Controls.Add(_dlcList);
-        Controls.Add(detailSplitter);
-        Controls.Add(_detail);
-        Controls.Add(bar);
-        Controls.Add(_sidebar);
-        Controls.Add(status);
-        UpdateViewToggle();
+        if (_search.Visible)
+        {
+            var right = w - pad;
+            if (_gender.Visible)
+            {
+                _gender.Location = new Point(right - _gender.Width, y);
+                right = _gender.Left - Px(8);
+            }
+            _dlc.Location = new Point(right - _dlc.Width, y);
+            right = _dlc.Left - Px(8);
+            _search.SetBounds(pad, y, Math.Max(Px(200), right - pad), _search.Height);
+            y += _search.Height + Px(12);
+        }
+
+        _chips.SetBounds(pad, y, w - pad * 2, _chips.Height);
+        if (_chips.Visible)
+            y += _chips.Height + Px(10);
+        _top.Height = y + Px(4);
     }
 
     private void WireEvents()
     {
-        _sidebar.DrawItem += DrawSidebarItem;
-        _sidebar.SelectedIndexChanged += (_, _) =>
-        {
-            if (_sidebar.SelectedItem is Category c && c != _state.Category)
-                SetCategory(c);
-        };
+        _nav.SelectedChanged += (_, _) => SetCategory(_nav.Selected);
+        _nav.ReindexClicked += (_, _) => Reindex(firstRun: false);
         _search.TextChanged += (_, _) =>
         {
             _state = _state with { Text = _search.Text };
@@ -142,34 +138,31 @@ internal sealed class MainForm : Form
             }
         };
         _searchTimer.Tick += (_, _) => RunSearchNow();
-        _dlc.SelectedIndexChanged += (_, _) =>
+        _dlc.SelectedChanged += (_, _) =>
         {
-            if (_updatingFilters)
-                return;
-            _state = _state with { Dlc = (_dlc.SelectedItem as DlcSummary)?.Name };
+            _state = _state with { Dlc = _dlc.SelectedValue as string };
             RunSearchNow();
         };
-        _gender.SelectedIndexChanged += (_, _) =>
+        _gender.SelectedChanged += (_, _) =>
         {
-            if (_updatingFilters)
-                return;
-            _state = _state with { Gender = (Gender)_gender.SelectedItem! };
+            _state = _state with { Gender = (Gender)_gender.SelectedValue! };
             RunSearchNow();
         };
-        _viewToggle.Click += (_, _) => ToggleView();
-        _reindex.Click += (_, _) => Reindex(firstRun: false);
+        _scope.SelectedChanged += (_, _) =>
+        {
+            _state = _state with { FavoritesOnly = _scope.Selected == 1 };
+            RunSearchNow();
+        };
+        _view.SelectedChanged += (_, _) => _grid.Mode = _view.Selected == 0 ? ViewMode.Grid : ViewMode.List;
+        _chips.Toggled += (_, tag) =>
+        {
+            _state = _state.ToggleTag(tag);
+            RunSearchNow();
+        };
 
-        _grid.SelectionChanged += (_, _) => ShowDetail(_grid.SelectedItem);
-        _grid.ItemActivated += (_, _) => _detail.FocusFields();
+        _grid.ItemActivated += (_, _) => OpenDetail();
         _grid.CopyRequested += (_, item) => Copy(AssetText.CopyText(item));
-        _detail.Copied += (_, text) => Copy(text);
-        _detail.FavoriteToggled += (_, favorite) => SetFavorite(favorite);
-        _dlcList.DoubleClick += (_, _) => OpenSelectedDlc();
-        _dlcList.KeyDown += (_, e) =>
-        {
-            if (e.KeyCode == Keys.Enter)
-                OpenSelectedDlc();
-        };
+        _dlcTable.DlcActivated += (_, d) => OpenDlc(d);
     }
 
     protected override void OnShown(EventArgs e)
@@ -181,7 +174,6 @@ internal sealed class MainForm : Form
             return;
         }
         LoadCatalog();
-        _sidebar.SelectedItem = Category.Props;
         SetCategory(Category.Props);
         _grid.Focus();
     }
@@ -191,22 +183,21 @@ internal sealed class MainForm : Form
         switch (keyData)
         {
             case Keys.Control | Keys.F:
-                _search.Focus();
-                _search.SelectAll();
+                _search.FocusText();
                 return true;
-            case Keys.Control | Keys.L:
-                ToggleView();
+            case Keys.Control | Keys.L when !_state.Category.IsDlcList:
+                _view.Selected = 1 - _view.Selected;
                 return true;
-            case Keys.Control | Keys.D when _grid.SelectedItem is not null:
-                SetFavorite(!_queries.IsFavorite(_grid.SelectedItem.Kind, _grid.SelectedItem.Key));
+            case Keys.Control | Keys.D when _grid.SelectedItem is { } fav:
+                ToggleFavorite(fav);
                 return true;
             case Keys.Control | Keys.C when _grid.Focused && _grid.SelectedItem is { } item:
                 Copy(AssetText.CopyText(item));
                 return true;
-            case Keys.Escape when _search.Focused && _search.TextLength > 0:
+            case Keys.Escape when _search.TextFocused && _search.Text.Length > 0:
                 _search.Clear();
                 return true;
-            case Keys.Escape when _detail.ContainsFocus:
+            case Keys.Escape when _search.TextFocused:
                 _grid.Focus();
                 return true;
         }
@@ -219,95 +210,78 @@ internal sealed class MainForm : Form
         _counts = _queries.CountsByKind();
         var dlcs = _queries.Dlcs();
 
-        _updatingFilters = true;
-        _dlc.Items.Clear();
-        _dlc.Items.Add("All DLCs");
-        foreach (var d in dlcs.Where(d => d.CountsByKind.Count > 0))
-            _dlc.Items.Add(d);
-        _dlc.SelectedIndex = 0;
+        _dlc.Items =
+        [
+            new PickerItem(null, "All"),
+            .. dlcs.Where(d => d.CountsByKind.Count > 0)
+                .OrderByDescending(d => d.OrderIndex)
+                .Select(d => new PickerItem(d.Name, d.Name, d.CountsByKind.Values.Sum().ToString("N0"))),
+        ];
+        _dlc.Select(null);
         _state = _state with { Dlc = null };
-        _updatingFilters = false;
-
-        _dlcList.BeginUpdate();
-        _dlcList.Items.Clear();
-        foreach (var d in dlcs)
-        {
-            string N(params string[] kinds) => kinds.Sum(k => d.CountsByKind.GetValueOrDefault(k)).ToString("N0");
-            _dlcList.Items.Add(new ListViewItem(
-            [
-                d.OrderIndex.ToString(), d.Name, d.Title ?? "",
-                N(AssetKind.Prop), N(AssetKind.Vehicle), N(AssetKind.Ped), N(AssetKind.Clothing),
-                N(AssetKind.Anim), N(AssetKind.Mlo), N(AssetKind.Ymap), d.CountsByKind.Values.Sum().ToString("N0"),
-            ]) { Tag = d });
-        }
-        // Packs only have titles when the game text names them; hide the column otherwise.
-        _dlcList.Columns[2].Width = dlcs.Any(d => !string.IsNullOrEmpty(d.Title)) ? LogicalToDeviceUnits(200) : 0;
-        _dlcList.EndUpdate();
+        _dlcTable.SetDlcs(dlcs);
 
         var version = _db.GetMeta("game_version");
         var indexedAt = DateTime.TryParse(_db.GetMeta("indexed_at"), out var at) ? at.ToLocalTime().ToString("g") : "?";
-        _indexInfo.Text = $"{_counts.Values.Sum():N0} assets · game {version} · indexed {indexedAt}";
-        _sidebar.Invalidate();
+        _nav.SetCounts(CategoryCount, $"{_counts.Values.Sum():N0} assets · game {version}\nIndexed {indexedAt}");
     }
 
-    private static string DlcLabel(DlcSummary d) => d.Title is { Length: > 0 } t ? $"{d.Name} — {t}" : d.Name;
+    private int? CategoryCount(Category c) => c switch
+    {
+        { IsDlcList: true } => _dlcTable.Count,
+        { Kind: null } => _counts.Values.Sum(),
+        { Tags.Count: 0, Kind: { } k } => _counts.GetValueOrDefault(k),
+        _ => null,
+    };
 
     private void SetCategory(Category category)
     {
         _state = _state.WithCategory(category);
+        _nav.Selected = category;
         _grid.Visible = !category.IsDlcList;
-        _dlcList.Visible = category.IsDlcList;
+        _dlcTable.Visible = category.IsDlcList;
+        _search.Visible = _dlc.Visible = _scope.Visible = _view.Visible = !category.IsDlcList;
         _gender.Visible = category.HasGender;
-        _updatingFilters = true;
-        _gender.SelectedItem = _state.Gender;
-        _updatingFilters = false;
+        _gender.Select(_state.Gender);
+        _scope.Selected = 0;
+        _grid.EmptyText = "No results";
         LoadChips();
+        _top.PerformLayout();
+
         if (category.IsDlcList)
         {
             _searchTimer.Stop();
-            _status.Text = $"{_dlcList.Items.Count} packs in load order · double-click to browse a pack";
-            ShowDetail(null);
+            _generation++;
+            _title.Set("DLCs", $"{_dlcTable.Count} packs · click a column to sort · double-click to browse a pack");
+            _dlcTable.Focus();
         }
         else
         {
             RunSearchNow();
+            UpdateFavoriteCount();
         }
     }
 
     private void LoadChips()
     {
-        _chips.SuspendLayout();
-        foreach (Control c in _chips.Controls)
-            c.Dispose();
-        _chips.Controls.Clear();
-        if (_state.Category.Kind is { } kind)
+        var chips = new List<Chip>();
+        if (_state.Category.Kind is { } kind && !_state.Category.IsDlcList)
         {
             var hidden = new HashSet<string>(_state.Category.Tags, StringComparer.OrdinalIgnoreCase);
             if (_state.Category.HasGender)
                 hidden.UnionWith(["Male", "Female"]);
-            foreach (var (tag, count) in _queries.TopTags(kind, 24).Where(t => !hidden.Contains(t.Tag)).Take(16))
-            {
-                var chip = new CheckBox
-                {
-                    Text = tag,
-                    Appearance = Appearance.Button,
-                    FlatStyle = FlatStyle.Flat,
-                    AutoSize = true,
-                    Margin = new Padding(0, 0, 6, 0),
-                    Checked = _state.Tags.Contains(tag),
-                };
-                chip.FlatAppearance.BorderColor = Theme.Border;
-                chip.FlatAppearance.CheckedBackColor = Theme.Selected;
-                _toolTip.SetToolTip(chip, $"{count:N0} assets");
-                chip.CheckedChanged += (_, _) =>
-                {
-                    _state = _state.ToggleTag(tag);
-                    RunSearchNow();
-                };
-                _chips.Controls.Add(chip);
-            }
+            chips.AddRange(_queries.TopTags(kind, 30).Where(t => !hidden.Contains(t.Tag)).Take(24)
+                .Select(t => new Chip(t.Tag, $"{t.Count:N0} assets")));
         }
-        _chips.ResumeLayout();
+        _chips.SetChips(chips, _state.Tags);
+        _chips.Visible = chips.Count > 0;
+    }
+
+    private void UpdateFavoriteCount()
+    {
+        var n = _queries.Search(new BrowseState { Category = _state.Category, FavoritesOnly = true }.ToQuery(limit: 1)).Total;
+        _scope.SetText(1, n > 0 ? $"Favorites  {n:N0}" : "Favorites");
+        _top.PerformLayout();
     }
 
     private async void RunSearchNow()
@@ -317,17 +291,17 @@ internal sealed class MainForm : Form
             return;
 
         var generation = ++_generation;
-        var query = _state.ToQuery();
+        var state = _state;
         var sw = Stopwatch.StartNew();
         ResultPager pager;
         try
         {
-            pager = await Task.Run(() => ResultPager.Load(_queries.Search, query));
+            pager = await Task.Run(() => ResultPager.Load(_queries.Search, state.ToQuery()));
         }
         catch (Exception e)
         {
             if (generation == _generation)
-                _status.Text = "Search failed: " + e.Message;
+                _toast.Show("Search failed: " + e.Message, Glyph.Clear);
             AppLog.Write("app", [e.ToString()]);
             return;
         }
@@ -335,61 +309,57 @@ internal sealed class MainForm : Form
         // A newer search started while this one ran: drop the stale result.
         if (generation != _generation)
             return;
+        _grid.EmptyText = state.FavoritesOnly ? "No favorites here yet — press Ctrl+D on an asset" : "No results";
         _grid.SetItems(pager);
-        _status.Text = $"{pager.Total:N0} {(pager.Total == 1 ? "result" : "results")} · {sw.ElapsedMilliseconds} ms";
+        var noun = pager.Total == 1 ? "result" : "results";
+        _title.Set(state.Category.Title, $"{pager.Total:N0} {noun} · {sw.ElapsedMilliseconds} ms");
     }
 
-    private void ShowDetail(AssetSummary? item)
+    private void OpenDetail()
     {
-        if (item is null)
-        {
-            _detail.Display(null, false);
+        if (_grid.SelectedIndex < 0)
             return;
-        }
-        _detail.Display(_queries.Get(item.Id), _queries.IsFavorite(item.Kind, item.Key));
-    }
-
-    private void SetFavorite(bool favorite)
-    {
-        if (_grid.SelectedItem is not { } item)
-            return;
-        _queries.SetFavorite(item.Kind, item.Key, favorite);
-        _status.Text = favorite ? $"Added {item.Name} to favorites" : $"Removed {item.Name} from favorites";
-        if (_state.Category.FavoritesOnly)
-            RunSearchNow();
-        else
-            ShowDetail(item);
-    }
-
-    private void OpenSelectedDlc()
-    {
-        if (_dlcList.SelectedItems.Count == 0 || _dlcList.SelectedItems[0].Tag is not DlcSummary d)
-            return;
-        _sidebar.SelectedItem = Category.All;
-        var index = _dlc.Items.IndexOf(d);
-        _dlc.SelectedIndex = index >= 0 ? index : 0;
+        var favoritesChanged = false;
+        using var form = new DetailForm(_queries, _grid.ItemAt, _grid.Count, _grid.SelectedIndex);
+        form.FavoritesChanged += (_, _) => favoritesChanged = true;
+        form.ShowDialog(this);
+        _grid.SelectedIndex = form.Index;
+        if (favoritesChanged)
+            AfterFavoritesChanged();
         _grid.Focus();
     }
 
-    private void ToggleView()
+    private void ToggleFavorite(AssetSummary item)
     {
-        _grid.Mode = _grid.Mode == ViewMode.Grid ? ViewMode.List : ViewMode.Grid;
-        UpdateViewToggle();
+        var favorite = !_queries.IsFavorite(item.Kind, item.Key);
+        _queries.SetFavorite(item.Kind, item.Key, favorite);
+        _toast.Show(favorite ? $"Added {item.Name} to favorites" : $"Removed {item.Name} from favorites", favorite ? Glyph.StarFilled : Glyph.Star);
+        AfterFavoritesChanged();
     }
 
-    private void UpdateViewToggle() => _viewToggle.Text = _grid.Mode == ViewMode.Grid ? "▦ Grid" : "☰ List";
+    private void AfterFavoritesChanged()
+    {
+        UpdateFavoriteCount();
+        if (_state.FavoritesOnly)
+            RunSearchNow();
+    }
+
+    private void OpenDlc(DlcSummary d)
+    {
+        SetCategory(Category.All);
+        _dlc.Select(d.Name);
+        _state = _state with { Dlc = d.Name };
+        _top.PerformLayout();
+        RunSearchNow();
+        _grid.Focus();
+    }
 
     private void Copy(string text)
     {
-        try
-        {
-            Clipboard.SetText(text);
-            _status.Text = $"Copied: {text}";
-        }
-        catch (System.Runtime.InteropServices.ExternalException)
-        {
-            _status.Text = "Clipboard is busy, try again.";
-        }
+        if (Clipboard2.TrySet(text))
+            _toast.Show($"Copied {text}");
+        else
+            _toast.Show("Clipboard is busy, try again", Glyph.Clear);
     }
 
     private bool Reindex(bool firstRun)
@@ -402,39 +372,32 @@ internal sealed class MainForm : Form
             LoadCatalog();
             SetCategory(_state.Category);
         }
-        _status.Text = form.Result is { Skipped: false } r ? $"Indexed {r.Assets:N0} assets." : "Index is up to date.";
+        if (form.Result is { Skipped: false } r)
+            _toast.Show($"Indexed {r.Assets:N0} assets");
         return true;
     }
 
-    private void DrawSidebarItem(object? sender, DrawItemEventArgs e)
+    /// <summary>Large page title with a muted line next to it (result count, timing).</summary>
+    private sealed class PageTitle : ThemedControl
     {
-        if (e.Index < 0 || _sidebar.Items[e.Index] is not Category c)
-            return;
-        var selected = (e.State & DrawItemState.Selected) != 0;
-        using (var back = new SolidBrush(selected ? Theme.Selected : Theme.Panel))
-            e.Graphics.FillRectangle(back, e.Bounds);
-        if (selected)
+        private string _title = "";
+        private string _subtitle = "";
+
+        public void Set(string title, string subtitle)
         {
-            using var accent = new SolidBrush(Theme.Accent);
-            e.Graphics.FillRectangle(accent, e.Bounds.X, e.Bounds.Y, LogicalToDeviceUnits(3), e.Bounds.Height);
+            _title = title;
+            _subtitle = subtitle;
+            Invalidate();
         }
 
-        var pad = LogicalToDeviceUnits(14);
-        var bounds = Rectangle.Inflate(e.Bounds, -pad, 0);
-        TextRenderer.DrawText(e.Graphics, c.Title, selected ? Theme.Bold : Theme.UiFont, bounds, Theme.Text,
-            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-        if (CategoryCount(c) is { } n)
-            TextRenderer.DrawText(e.Graphics, n.ToString("N0"), Theme.Small, bounds, Theme.Muted,
-                TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.Clear(BackColor);
+            var titleWidth = TextRenderer.MeasureText(_title, Theme.PageTitle).Width;
+            TextRenderer.DrawText(g, _title, Theme.PageTitle, new Rectangle(0, 0, titleWidth + Px(4), Height), Theme.Text, Theme.Line);
+            TextRenderer.DrawText(g, _subtitle, Theme.UiFont, new Rectangle(titleWidth + Px(12), Px(4), Width - titleWidth - Px(12), Height),
+                Theme.Muted, Theme.Line);
+        }
     }
-
-    /// <summary>Count shown next to a sidebar entry when it is a whole kind (filtered categories show none).</summary>
-    private int? CategoryCount(Category c) => c switch
-    {
-        { IsDlcList: true } => null,
-        { FavoritesOnly: true } => null,
-        { Kind: null } => _counts.Values.Sum(),
-        { Tags.Count: 0, Kind: { } k } => _counts.GetValueOrDefault(k),
-        _ => null,
-    };
 }

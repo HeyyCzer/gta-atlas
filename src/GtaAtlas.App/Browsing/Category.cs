@@ -4,7 +4,7 @@ using GtaAtlas.Indexer.Extractors;
 namespace GtaAtlas.App.Browsing;
 
 /// <summary>A sidebar entry: a fixed slice of the index (kind and/or tags) the user browses and searches within.</summary>
-public sealed record Category(string Id, string Title, string? Kind, IReadOnlyList<string> Tags, bool FavoritesOnly = false)
+public sealed record Category(string Id, string Title, string? Kind, IReadOnlyList<string> Tags)
 {
     public const string DlcsId = "dlcs";
 
@@ -25,10 +25,9 @@ public sealed record Category(string Id, string Title, string? Kind, IReadOnlyLi
     public static Category Ipls { get; } = new("ipls", "IPLs", AssetKind.Ymap, [YmapExtractor.IplTag]);
     public static Category Ymaps { get; } = new("ymaps", "YMAPs", AssetKind.Ymap, []);
     public static Category Dlcs { get; } = new(DlcsId, "DLCs", null, []);
-    public static Category Favorites { get; } = new("favorites", "Favorites", null, [], FavoritesOnly: true);
 
     public static IReadOnlyList<Category> Sidebar { get; } =
-        [Props, Vehicles, Peds, Clothes, Animations, AnimDicts, Mlos, Ipls, Ymaps, All, Dlcs, Favorites];
+        [Props, Vehicles, Peds, Clothes, Animations, AnimDicts, Mlos, Ipls, Ymaps, All, Dlcs];
 }
 
 public enum Gender
